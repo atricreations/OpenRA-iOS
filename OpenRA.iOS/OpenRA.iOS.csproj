@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    OpenRA iOS app host. Targets the iPhone Duo (iOS 27).
+    Build on macOS only:  dotnet build -f net10.0-ios -p:RuntimeIdentifier=iossimulator-arm64 -p:CodesignDisable=true
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>27.0</SupportedOSPlatformVersion>
+    <TargetPlatform>ios</TargetPlatform>
+    <OutputType>Exe</OutputType>
+    <Nullable>disable</Nullable>
+    <RootNamespace>OpenRA</RootNamespace>
+    <AssemblyName>OpenRA.iOS</AssemblyName>
+    <ApplicationId>com.example.openra.ios</ApplicationId>
+    <ApplicationDisplayVersion>0.1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <!--
+      Bootstrap strategy: run managed code in the interpreter so the engine's
+      reflection-based mod/trait/file-format loading works unchanged.
+      Phase 8 switches this to AOT (requires the AOT object registry;
+      see SCAFFOLDING_PLAN.md).
+    -->
+    <UseInterpreter>true</UseInterpreter>
+    <LinkMode>None</LinkMode>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="AppDelegate.cs" />
+    <Compile Include="ViewController.cs" />
+    <Compile Include="IosGameLauncher.cs" />
+    <Compile Include="NativeLibraryResolver.cs" />
+    <Compile Include="AssetExtractor.cs" />
+    <Compile Include="AotPreserve.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenRA.Game\OpenRA.Game.csproj" />
+    <ProjectReference Include="..\OpenRA.Platforms.iOS\OpenRA.Platforms.iOS.csproj" />
+    <ProjectReference Include="..\OpenRA.Mods.Common\OpenRA.Mods.Common.csproj" />
+    <ProjectReference Include="..\OpenRA.Mods.Cnc\OpenRA.Mods.Cnc.csproj" />
+    <ProjectReference Include="..\OpenRA.Mods.D2k\OpenRA.Mods.D2k.csproj" />
+  </ItemGroup>
+  <!-- Game data packaged by scripts/package-assets.ps1 (Phase 5) -->
+  <ItemGroup>
+    <BundleResource Include="Content\*.zip" Condition="Exists('Content\openra-data.zip')" />
+  </ItemGroup>
+  <!--
+    Native libraries (Phase 2): static archives built by scripts/build-native-libs.sh
+    <NativeReference Include="native\device\libSDL2.a" />
+    <NativeReference Include="native\device\libfreetype.a" />
+    <NativeReference Include="native\device\liblua51.a" />
+  -->
+</Project>

@@ -1,0 +1,31 @@
+OpenRA iOS
+Copyright (c) The OpenRA Developers and Contributors
+
+This project is a derivative of OpenRA, an open source reimplementation of
+Command & Conquer: Red Alert, and includes code derived from two prior
+community ports. All derived code is licensed under the GNU General Public
+License version 3 or later, consistent with OpenRA itself.
+
+1. OpenRA (https://github.com/OpenRA/OpenRA)
+   The engine source (OpenRA.Game, OpenRA.Mods.*, OpenRA.Platforms.Default,
+   OpenRA.Launcher, glsl/, mods/) is vendored from OpenRA, GPL v3 or later.
+   The vendored tree tracks a pinned upstream commit; local modifications
+   are listed in the commit history of this repository and in
+   scripts/sync-upstream.sh (LOCAL_ENGINE_CHANGES).
+
+2. OpenRA iOS / "NUKEHOUR" port (https://github.com/NUKEHOUR/OpenRA)
+   Portions of OpenRA.Platforms.iOS, OpenRA.Game/Sound/PcmAudioMixer.cs,
+   OpenRA.Game/Sound/HapticFeedback.cs, the haptics hooks in
+   OpenRA.Game/Game.cs, and the AOT-override hooks in
+   OpenRA.Game/ObjectCreator.cs are derived from the NUKEHOUR iOS port
+   patches (0008-integrated-ios-runtime, 0009-ios-two-finger-gesture-
+   arbitration). GPL v3 or later.
+
+3. OpenRA.Android (https://github.com/nurbsn/OpenRA.Android)
+   The asset-extraction pattern (OpenRA.iOS/AssetExtractor.cs), the native
+   library resolver pattern (OpenRA.iOS/NativeLibraryResolver.cs), and the
+   mobile launch arguments (OpenRA.iOS/IosGameLauncher.cs) are derived from
+   OpenRA.Android. GPL v3 or later.
+
+Red Alert game data (ra.mix, etc.) is not included in this repository and
+remains the property of its respective rights holders.

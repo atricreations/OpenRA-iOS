@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    iOS platform layer. Compiles the SDL2-based desktop platform sources (minus the
+    OpenAL sound engine and the DefaultPlatform entry point) together with the iOS
+    replacements, and publishes the result as the OpenRA.Platforms.Default assembly
+    so the engine's platform discovery finds it unmodified.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <SupportedOSPlatformVersion>27.0</SupportedOSPlatformVersion>
+    <TargetPlatform>ios</TargetPlatform>
+    <OutputType>Library</OutputType>
+    <AssemblyName>OpenRA.Platforms.Default</AssemblyName>
+    <RootNamespace>OpenRA.Platforms.Default</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\OpenRA.Platforms.Default\**\*.cs"
+             Exclude="..\OpenRA.Platforms.Default\bin\**;..\OpenRA.Platforms.Default\obj\**;..\OpenRA.Platforms.Default\DefaultPlatform.cs;..\OpenRA.Platforms.Default\OpenAlSoundEngine.cs" />
+    <Compile Include="IosPlatform.cs" />
+    <Compile Include="IosHapticEngine.cs" />
+    <Compile Include="Sdl2SoundEngine.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenRA.Game\OpenRA.Game.csproj" />
+    <PackageReference Include="OpenRA-Freetype6" Version="1.0.12" />
+    <PackageReference Include="OpenRA-SDL2-CS" Version="1.0.44" />
+  </ItemGroup>
+  <!-- The NuGet packages copy desktop native libraries into the output.
+       On iOS the native libraries are linked into the app as static archives. -->
+  <Target Name="RemoveDesktopNativeLibraries" AfterTargets="Build">
+    <Delete Files="$(TargetDir)lua51.dylib;$(TargetDir)freetype6.dylib;$(TargetDir)soft_oal.dylib;$(TargetDir)SDL2.dylib" />
+  </Target>
+</Project>

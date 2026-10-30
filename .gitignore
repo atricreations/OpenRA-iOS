@@ -1,0 +1,11 @@
+bin/
+obj/
+*.user
+.qwen/
+.DS_Store
+native/src/
+native/libs/
+native/build-*
+OpenRA.iOS/Content/openra-data.zip
+OpenRA.iOS/native/
+*.log

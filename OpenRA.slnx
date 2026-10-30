@@ -1,0 +1,13 @@
+<Solution>
+  <Project Path="OpenRA.Game/OpenRA.Game.csproj" />
+  <Project Path="OpenRA.Launcher/OpenRA.Launcher.csproj" />
+  <Project Path="OpenRA.Mods.Cnc/OpenRA.Mods.Cnc.csproj" />
+  <Project Path="OpenRA.Mods.Common/OpenRA.Mods.Common.csproj" />
+  <Project Path="OpenRA.Mods.D2k/OpenRA.Mods.D2k.csproj" />
+  <Project Path="OpenRA.Platforms.Default/OpenRA.Platforms.Default.csproj" />
+  <Project Path="OpenRA.Platforms.iOS/OpenRA.Platforms.iOS.csproj" />
+  <Project Path="OpenRA.iOS/OpenRA.iOS.csproj" />
+  <Project Path="OpenRA.WindowsLauncher/OpenRA.WindowsLauncher.csproj">
+    <Build Project="false" />
+  </Project>
+</Solution>
