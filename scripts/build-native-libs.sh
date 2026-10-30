@@ -37,9 +37,12 @@ OUT_ROOT="$REPO_ROOT/native/libs"
 CACHE_DIR="${NATIVE_SRC_CACHE:-$HOME/.cache/openra-ios-native-src}"
 
 IOS_MIN="27.0"
+# target-dir | xcode-sdk | clang --target triplet | autotools --host triplet
+# (SDL2/FreeType configure scripts detect iOS from the *-apple-darwin host and
+# the -isysroot in CFLAGS, so the real iOS triple goes only into CFLAGS)
 TARGETS=(
-    "arm64-apple-ios$IOS_MIN|iphoneos|arm64-apple-ios$IOS_MIN"
-    "arm64-apple-ios$IOS_MIN-simulator|iphonesimulator|arm64-apple-ios$IOS_MIN-simulator"
+    "arm64-apple-ios$IOS_MIN|iphoneos|arm64-apple-ios$IOS_MIN|arm64-apple-darwin"
+    "arm64-apple-ios$IOS_MIN-simulator|iphonesimulator|arm64-apple-ios$IOS_MIN-simulator|arm64-apple-darwin"
 )
 
 SDL2_VERSION="2.32.10"
@@ -72,9 +75,9 @@ fetch_sources() {
     done
 }
 
-# build_lib <target-dir-name> <sdk> <clang-target-triplet>
+# build_lib <target-dir-name> <sdk> <clang-target-triplet> <configure-host>
 build_lib() {
-    local out="$1" sdk="$2" triple="$3"
+    local out="$1" sdk="$2" triple="$3" cfg_host="$4"
     local sdkpath sysroot_flags
 
     sdkpath="$(xcrun --sdk "$sdk" --show-sdk-path)"
@@ -99,14 +102,13 @@ build_lib() {
         CFLAGS="$sysroot_flags -O3 -fPIC" \
         LDFLAGS="$sysroot_flags" \
         "$SRC_DIR/SDL2-${SDL2_VERSION}/configure" \
-            --host="$triple" \
+            --host="$cfg_host" \
             --prefix=/usr/local \
             --disable-shared \
             --enable-static \
             --disable-everything \
             --enable-video=cocoa \
             --enable-audio=coreaudio \
-            --enable-hints=video,joystick \
             --disable-x11 \
             --disable-x11-shared \
             --disable-wayland \
@@ -117,8 +119,6 @@ build_lib() {
             --disable-oss \
             --disable-diskaudio \
             --disable-hidapi \
-            --disable-iconv \
-            --disable-iconv-text \
             --disable-power \
             --disable-sysvideo \
             --disable-video-offscreen \
@@ -137,7 +137,7 @@ build_lib() {
         CFLAGS="$sysroot_flags -O3 -fPIC" \
         LDFLAGS="$sysroot_flags" \
         "$SRC_DIR/freetype-${FREETYPE_VERSION}/configure" \
-            --host="$triple" \
+            --host="$cfg_host" \
             --prefix=/usr/local \
             --disable-shared \
             --enable-static \
@@ -147,9 +147,7 @@ build_lib() {
             --disable-pdf-doc \
             --without-zlib \
             --without-bzip2 \
-            --without-png \
             --without-harfbuzz \
-            --without-freetype-module \
             > configure.log 2>&1) || { tail -50 "$ft_build/configure.log"; exit 1; }
     (cd "$ft_build" && make -j"$(sysctl -n hw.ncpu)" > build.log 2>&1) \
         || { tail -50 "$ft_build/build.log"; exit 1; }
@@ -180,8 +178,8 @@ main() {
     echo "Device min iOS: $IOS_MIN"
     fetch_sources
     for spec in "${TARGETS[@]}"; do
-        IFS='|' read -r dirname sdk triple <<< "$spec"
-        build_lib "$OUT_ROOT/$dirname" "$sdk" "$triple"
+        IFS='|' read -r dirname sdk triple cfg_host <<< "$spec"
+        build_lib "$OUT_ROOT/$dirname" "$sdk" "$triple" "$cfg_host"
     done
     echo ""
     echo "All native libraries built under: $OUT_ROOT"

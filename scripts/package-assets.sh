@@ -29,7 +29,15 @@ cp -R "$REPO_ROOT/mods/." "$STAGE/mods/"
 
 echo "Packing $(du -sh "$STAGE" | cut -f1) of engine content..."
 rm -f "$DEST"
-(cd "$STAGE" && zip -qry "$DEST" glsl mods)
+if command -v ditto > /dev/null 2>&1; then
+    # macOS-native; stores glsl/ and mods/ at the archive root
+    (cd "$STAGE" && ditto -c -k --keepParent glsl mods "$DEST")
+elif command -v zip > /dev/null 2>&1; then
+    (cd "$STAGE" && zip -qry "$DEST" glsl mods)
+else
+    echo "error: need 'ditto' (macOS) or 'zip' to build the asset archive" >&2
+    exit 1
+fi
 
 echo "Wrote $DEST ($(du -h "$DEST" | cut -f1))"
 echo "First-launch extraction target: Documents/OpenRA/Game/"
