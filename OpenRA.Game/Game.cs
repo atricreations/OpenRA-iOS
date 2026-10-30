@@ -465,7 +465,7 @@ namespace OpenRA
 
 		public static IPlatform CreatePlatform(string platformName)
 		{
-			IPlatform platform;
+			IPlatform platform = null;
 
 			if (PlatformFactoryOverride != null)
 				platform = PlatformFactoryOverride(platformName);

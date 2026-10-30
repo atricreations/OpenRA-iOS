@@ -51,9 +51,16 @@ namespace OpenRA
 			Game.PlatformFactoryOverride = _ => new OpenRA.Platforms.Default.IosPlatform();
 
 			// Route game audio through the playback category so it is mixed with other apps.
-			var audioSession = AVAudioSession.SharedInstance();
-			audioSession.SetCategory(AVAudioSessionCategory.Playback, AVAudioSessionCategoryOptions.MixWithOthers);
-			audioSession.SetActive(true);
+			try
+			{
+				var audioSession = AVAudioSession.SharedInstance();
+				audioSession.SetCategory(AVAudioSessionCategory.Playback, AVAudioSessionCategoryOptions.MixWithOthers);
+				audioSession.SetActive(true);
+			}
+			catch (Exception e)
+			{
+				Console.WriteLine($"Audio session configuration failed (continuing): {e}");
+			}
 
 			Window = new UIWindow(UIScreen.MainScreen.Bounds)
 			{
