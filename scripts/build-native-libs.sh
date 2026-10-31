@@ -63,7 +63,8 @@ download() {
 fetch_sources() {
     download "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.tar.gz" \
         "$CACHE_DIR/SDL2-${SDL2_VERSION}.tar.gz"
-    download "https://sourceforge.net/projects/freetype/files/freetype2/${FREETYPE_VERSION}/freetype-${FREETYPE_VERSION}.tar.gz/download" \
+    # FreeType 2.13+ publishes on GNU Savannah (SourceForge is unreliable)
+    download "https://download.savannah.gnu.org/releases/freetype/freetype-${FREETYPE_VERSION}.tar.gz" \
         "$CACHE_DIR/freetype-${FREETYPE_VERSION}.tar.gz"
     download "https://www.lua.org/ftp/lua-${LUA_VERSION}.tar.gz" \
         "$CACHE_DIR/lua-${LUA_VERSION}.tar.gz"
