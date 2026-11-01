@@ -40,6 +40,14 @@ namespace OpenRA.Platforms.Default
 
 		public static string Version { get; private set; }
 
+		// The framebuffer that receives the final composited frame (the "window").
+		// On desktop platforms this is the default framebuffer (0). On Apple's
+		// uikit GL driver the window drawable is an FBO owned by the GL view
+		// (created at context setup), and the default framebuffer (0) is
+		// reported as GL_FRAMEBUFFER_UNSUPPORTED, so the id is captured from
+		// the binding state after context initialization.
+		public static uint WindowFramebuffer { get; internal set; }
+
 		#region Constants
 
 		public const int GL_FALSE = 0;
@@ -686,9 +694,16 @@ namespace OpenRA.Platforms.Default
 						break;
 				}
 
-				// Core features are defined as the shared feature set of GL 3.2 and (GLES 3 + derivatives, BGRA extensions)
-				var hasBGRA = SDL.SDL_GL_ExtensionSupported("GL_EXT_texture_format_BGRA8888") == SDL.SDL_bool.SDL_TRUE;
-				var hasDerivatives = SDL.SDL_GL_ExtensionSupported("GL_OES_standard_derivatives") == SDL.SDL_bool.SDL_TRUE;
+				// Core features are defined as the shared feature set of GL 3.2 and (GLES 3 + derivatives, BGRA extensions).
+				// BGRA texture uploads and standard derivatives are core in OpenGL ES 3.0, so for
+				// major >= 3 no extension query is required. On GLES 2.0 they only exist as
+				// extensions, and some drivers list the BGRA one under a vendor name (Apple's
+				// GLES implementation reports GL_APPLE_texture_format_BGRA8888).
+				var hasBGRA = major >= 3 ||
+					SDL.SDL_GL_ExtensionSupported("GL_EXT_texture_format_BGRA8888") == SDL.SDL_bool.SDL_TRUE ||
+					SDL.SDL_GL_ExtensionSupported("GL_APPLE_texture_format_BGRA8888") == SDL.SDL_bool.SDL_TRUE;
+				var hasDerivatives = major >= 3 ||
+					SDL.SDL_GL_ExtensionSupported("GL_OES_standard_derivatives") == SDL.SDL_bool.SDL_TRUE;
 				if (Version.Contains(" ES") && hasBGRA && hasDerivatives && major >= 3)
 				{
 					hasValidConfiguration = true;

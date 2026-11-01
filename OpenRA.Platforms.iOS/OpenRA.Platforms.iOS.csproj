@@ -8,6 +8,9 @@
   <PropertyGroup>
     <TargetFramework>net10.0-ios</TargetFramework>
     <SupportedOSPlatformVersion>27.0</SupportedOSPlatformVersion>
+    <!-- The .NET 10 workload only ships the 27.1 pack (no 26.0/27.2 packs
+         exist for SDK 10.0.4xx); name it explicitly. -->
+    <TargetPlatformVersion>27.1</TargetPlatformVersion>
     <TargetPlatform>ios</TargetPlatform>
     <OutputType>Library</OutputType>
     <AssemblyName>OpenRA.Platforms.Default</AssemblyName>
@@ -16,12 +19,12 @@
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <!-- Own .cs files come from the Directory.Build.props **/*.cs glob;
+       the desktop platform sources are added explicitly (minus the
+       OpenAL engine and the DefaultPlatform entry point). -->
   <ItemGroup>
     <Compile Include="..\OpenRA.Platforms.Default\**\*.cs"
              Exclude="..\OpenRA.Platforms.Default\bin\**;..\OpenRA.Platforms.Default\obj\**;..\OpenRA.Platforms.Default\DefaultPlatform.cs;..\OpenRA.Platforms.Default\OpenAlSoundEngine.cs" />
-    <Compile Include="IosPlatform.cs" />
-    <Compile Include="IosHapticEngine.cs" />
-    <Compile Include="Sdl2SoundEngine.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenRA.Game\OpenRA.Game.csproj" />

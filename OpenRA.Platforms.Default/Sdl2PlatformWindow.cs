@@ -31,7 +31,7 @@ namespace OpenRA.Platforms.Default
 		bool disposed;
 
 		readonly Lock syncObject = new();
-		readonly Size windowSize;
+		Size windowSize;
 		Size surfaceSize;
 		float windowScale = 1f;
 		int2? lockedMousePosition;
@@ -225,14 +225,18 @@ namespace OpenRA.Platforms.Default
 
 				Console.WriteLine($"Using resolution: {windowSize.Width}x{windowSize.Height}");
 
-				const SDL.SDL_WindowFlags WindowFlags = SDL.SDL_WindowFlags.SDL_WINDOW_OPENGL | SDL.SDL_WindowFlags.SDL_WINDOW_ALLOW_HIGHDPI;
+				var windowFlags = SDL.SDL_WindowFlags.SDL_WINDOW_OPENGL | SDL.SDL_WindowFlags.SDL_WINDOW_ALLOW_HIGHDPI;
+				if (OperatingSystem.IsIOS())
+					windowFlags |= SDL.SDL_WindowFlags.SDL_WINDOW_FULLSCREEN;
 
 				// HiDPI doesn't work properly on OSX with (legacy) fullscreen mode
 				if (Platform.CurrentPlatform == PlatformType.OSX && windowMode == WindowMode.Fullscreen)
 					SDL.SDL_SetHint(SDL.SDL_HINT_VIDEO_HIGHDPI_DISABLED, "1");
 
 				window = SDL.SDL_CreateWindow("OpenRA", SDL.SDL_WINDOWPOS_CENTERED_DISPLAY(videoDisplay), SDL.SDL_WINDOWPOS_CENTERED_DISPLAY(videoDisplay),
-					windowSize.Width, windowSize.Height, WindowFlags);
+					windowSize.Width, windowSize.Height, windowFlags);
+
+				RefreshIOSDrawableSize();
 
 				if (Platform.CurrentPlatform == PlatformType.Linux)
 				{
@@ -352,6 +356,11 @@ namespace OpenRA.Platforms.Default
 			else
 				Context = new ThreadedGraphicsContext(new Sdl2GraphicsContext(this), vertexBatchSize, indexBatchSize);
 
+			// iPadOS may size a UIWindowScene after the GL context has been created.
+			// Querying here makes the engine layout use the final drawable rather than
+			// the physical UIScreen dimensions requested during SDL window creation.
+			RefreshIOSDrawableSize();
+
 			Context.SetVSyncEnabled(Game.Settings.Graphics.VSync);
 
 			SDL.SDL_SetModState(SDL.SDL_Keymod.KMOD_NONE);
@@ -445,6 +454,12 @@ namespace OpenRA.Platforms.Default
 
 		internal void WindowSizeChanged()
 		{
+			if (OperatingSystem.IsIOS())
+			{
+				RefreshIOSDrawableSize();
+				return;
+			}
+
 			// The ratio between pixels and points can change when moving between displays in OSX
 			// We need to recalculate our scale to account for the potential change in the actual rendered area
 			if (Platform.CurrentPlatform == PlatformType.OSX)
@@ -463,6 +478,24 @@ namespace OpenRA.Platforms.Default
 
 					OnWindowScaleChanged(oldScale, oldScale * scaleModifier, windowScale, windowScale * scaleModifier);
 				}
+			}
+		}
+
+		void RefreshIOSDrawableSize()
+		{
+			if (!OperatingSystem.IsIOS())
+				return;
+
+			SDL.SDL_GetWindowSize(Window, out var windowWidth, out var windowHeight);
+			SDL.SDL_GL_GetDrawableSize(Window, out var drawableWidth, out var drawableHeight);
+			if (windowWidth <= 0 || windowHeight <= 0 || drawableWidth <= 0 || drawableHeight <= 0)
+				return;
+
+			lock (syncObject)
+			{
+				windowSize = new Size(windowWidth, windowHeight);
+				surfaceSize = new Size(drawableWidth, drawableHeight);
+				windowScale = drawableWidth * 1f / windowWidth;
 			}
 		}
 
@@ -575,6 +608,10 @@ namespace OpenRA.Platforms.Default
 			SetSDLAttributes(profile);
 
 			const SDL.SDL_WindowFlags Flags = SDL.SDL_WindowFlags.SDL_WINDOW_HIDDEN | SDL.SDL_WindowFlags.SDL_WINDOW_OPENGL;
+			// SDL_Init(VIDEO) can leave a stale error in the SDL error state
+			// (e.g. SDL 2.32's dummy cursor setup), so only errors set by
+			// SDL_CreateWindow itself count as a failure here.
+			SDL.SDL_ClearError();
 			var window = SDL.SDL_CreateWindow("", 0, 0, 1, 1, Flags);
 			if (window == IntPtr.Zero || !string.IsNullOrEmpty(SDL.SDL_GetError()))
 			{

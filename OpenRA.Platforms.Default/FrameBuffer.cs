@@ -66,8 +66,8 @@ namespace OpenRA.Platforms.Default
 				throw new InvalidOperationException("OpenGL Error: See graphics.log for details.");
 			}
 
-			// Restore default buffer
-			OpenGL.glBindFramebuffer(OpenGL.GL_FRAMEBUFFER, 0);
+			// Restore the window's framebuffer
+			OpenGL.glBindFramebuffer(OpenGL.GL_FRAMEBUFFER, OpenGL.WindowFramebuffer);
 			OpenGL.CheckGLError();
 		}
 
@@ -107,7 +107,7 @@ namespace OpenRA.Platforms.Default
 			VerifyThreadAffinity();
 			OpenGL.glFlush();
 			OpenGL.CheckGLError();
-			OpenGL.glBindFramebuffer(OpenGL.GL_FRAMEBUFFER, 0);
+			OpenGL.glBindFramebuffer(OpenGL.GL_FRAMEBUFFER, OpenGL.WindowFramebuffer);
 			OpenGL.CheckGLError();
 			OpenGL.glViewport(cv[0], cv[1], cv[2], cv[3]);
 			OpenGL.CheckGLError();

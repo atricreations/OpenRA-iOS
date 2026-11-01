@@ -13,6 +13,7 @@
 #endregion
 
 using System;
+using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Foundation;
@@ -74,9 +75,30 @@ namespace OpenRA
 
 			if (candidate != null)
 			{
-				// Dynamic-library layout: the dylib ships inside the app bundle.
+				// Dynamic-library layout: the dylib ships in the app bundle's
+				// Frameworks/ folder (see OpenRA.iOS.csproj NativeReferences).
 				if (NativeLibrary.TryLoad(candidate, assembly, searchPath, out var handle) && handle != IntPtr.Zero)
 					return handle;
+
+				// The interpreter host stub may not carry an rpath that
+				// covers the dylib's bundle location, so also try explicit
+				// bundle paths (an absolute path always resolves in dlopen).
+				// The SDK drops Dynamic NativeReference dylibs at the bundle
+				// root on iOS; Frameworks/ is kept as a fallback.
+				var bundlePath = NSBundle.MainBundle.BundlePath;
+				if (!string.IsNullOrEmpty(bundlePath))
+				{
+					foreach (var sub in new[] { string.Empty, "Frameworks" })
+					{
+						var explicitPath = sub.Length == 0
+							? Path.Combine(bundlePath, candidate)
+							: Path.Combine(bundlePath, sub, candidate);
+						if (File.Exists(explicitPath) &&
+							NativeLibrary.TryLoad(explicitPath, assembly, searchPath, out handle) &&
+							handle != IntPtr.Zero)
+							return handle;
+					}
+				}
 			}
 
 			// Static-archive layout: the library is linked into the main executable,

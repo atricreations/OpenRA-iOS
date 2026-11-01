@@ -5,7 +5,14 @@
   -->
   <PropertyGroup>
     <TargetFramework>net10.0-ios</TargetFramework>
+    <!-- Apps linked against the iOS 26+ SDK must adopt scene-based lifecycle
+         (UIKit otherwise traps in NoSceneLifecycleAdoption, regardless of
+         deployment target); see SceneDelegate.cs + UIApplicationSceneManifest
+         in Info.plist. -->
     <SupportedOSPlatformVersion>27.0</SupportedOSPlatformVersion>
+    <!-- The .NET 10 workload only ships the 27.1 pack (no 26.0/27.2 packs
+         exist for SDK 10.0.4xx); name it explicitly. -->
+    <TargetPlatformVersion>27.1</TargetPlatformVersion>
     <TargetPlatform>ios</TargetPlatform>
     <OutputType>Exe</OutputType>
     <Nullable>disable</Nullable>
@@ -25,15 +32,8 @@
     <UseInterpreter>true</UseInterpreter>
     <LinkMode>None</LinkMode>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Include="Program.cs" />
-    <Compile Include="AppDelegate.cs" />
-    <Compile Include="ViewController.cs" />
-    <Compile Include="IosGameLauncher.cs" />
-    <Compile Include="NativeLibraryResolver.cs" />
-    <Compile Include="AssetExtractor.cs" />
-    <Compile Include="AotPreserve.cs" />
-  </ItemGroup>
+  <!-- Project-directory .cs files are picked up by the **/*.cs glob in
+       Directory.Build.props (upstream OpenRA convention). -->
   <ItemGroup>
     <ProjectReference Include="..\OpenRA.Game\OpenRA.Game.csproj" />
     <ProjectReference Include="..\OpenRA.Platforms.iOS\OpenRA.Platforms.iOS.csproj" />
@@ -41,14 +41,68 @@
     <ProjectReference Include="..\OpenRA.Mods.Cnc\OpenRA.Mods.Cnc.csproj" />
     <ProjectReference Include="..\OpenRA.Mods.D2k\OpenRA.Mods.D2k.csproj" />
   </ItemGroup>
-  <!-- Game data packaged by scripts/package-assets.ps1 (Phase 5) -->
+  <!-- Game data packaged by scripts/package-assets.sh (Phase 5). Forward
+       slashes on purpose: Exists() with backslashes never matches on macOS. -->
   <ItemGroup>
-    <BundleResource Include="Content\*.zip" Condition="Exists('Content\openra-data.zip')" />
+    <BundleResource Include="Content/*.zip" Condition="Exists('Content/openra-data.zip')">
+      <!-- Bundle at the app root (no Content/ prefix): AssetExtractor looks
+           up the archive via NSBundle.PathForResource at the bundle top level. -->
+      <Link>%(Filename)%(Extension)</Link>
+    </BundleResource>
   </ItemGroup>
   <!--
-    Native libraries (Phase 2): static archives built by scripts/build-native-libs.sh
-    <NativeReference Include="native\device\libSDL2.a" />
-    <NativeReference Include="native\device\libfreetype.a" />
-    <NativeReference Include="native\device\liblua51.a" />
+    Native libraries (Phase 2) static archives: REMOVED from the interpreter
+    bootstrap. These Kind=Static NativeReferences were pulling SDL/FreeType/Lua
+    ObjC classes INTO the main executable, which duplicates the identical classes
+    in the bundled dylibs (objc "Class X implemented in both" warnings) and
+    destabilises the SDL/UIKit GL view + EAGLContext dispatch (present fails with
+    GL_INVALID_VALUE). The runtime resolves every DllImport through the dylibs via
+    NativeLibraryResolver, so the static copies are redundant. Re-add for the
+    Phase 8 AOT switch (where there is no separate dylib to dlopen).
   -->
+  <!--
+    Native libraries, dynamic layout (active in the interpreter bootstrap):
+    scripts/build-dylibs.sh wraps the same Phase 2 archives in dylibs, which the
+    SDK places in the app bundle's Frameworks/ folder. NativeLibraryResolver
+    dlopens them by name / explicit path, so SDL_Init & co. resolve at runtime
+    without static linking.
+  -->
+  <ItemGroup>
+    <NativeReference Include="native/$(RuntimeIdentifier)/libSDL2.dylib">
+      <Kind>Dynamic</Kind>
+    </NativeReference>
+    <NativeReference Include="native/$(RuntimeIdentifier)/libfreetype.dylib">
+      <Kind>Dynamic</Kind>
+    </NativeReference>
+    <NativeReference Include="native/$(RuntimeIdentifier)/liblua51.dylib">
+      <Kind>Dynamic</Kind>
+    </NativeReference>
+  </ItemGroup>
+  <!--
+    OpenRA's desktop NuGet packages (OpenRA-Eluant, OpenRA-Freetype6, OpenRA-SDL2-CS)
+    ship macOS dylibs via Content items that activate when TargetPlatform=osx-x64
+    (Directory.Build.props sets that for desktop projects on macOS). The dylibs leak
+    into the iOS app's publish file set through transitive CopyToOutputDirectory and
+    are then misclassified as dynamic native references, which breaks the
+    install-name step (and would bundle the wrong binaries). The real native code is
+    the static libraries under native/$(RuntimeIdentifier), so strip the desktop
+    dylibs before bundle classification. Same fix as the shipped NUKEHOUR app.
+  -->
+  <Target Name="RemoveDesktopNativeLibrariesFromIosBundle" BeforeTargets="_ComputePublishLocation">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+        Condition="'%(Filename)%(Extension)' == 'lua51.dylib' Or '%(Filename)%(Extension)' == 'freetype6.dylib' Or '%(Filename)%(Extension)' == 'SDL2.dylib' Or '%(Filename)%(Extension)' == 'soft_oal.dylib'" />
+    </ItemGroup>
+  </Target>
+  <!--
+    The SDK places Dynamic NativeReference dylibs at the bundle root but
+    records the executable's references with a macOS-style
+    @executable_path/Contents/MonoBundle/... install path that does not exist
+    on iOS, so dyld fails to launch ("Library not loaded"). Rewrite the
+    references to the dylibs' actual bundle location after bundle assembly
+    (and before codesigning, so device builds sign the corrected binary).
+  -->
+  <Target Name="FixNativeDylibInstallNames" AfterTargets="_CreateAppBundle" BeforeTargets="_CodesignAppBundle" Condition="Exists('$(AppBundleDir)')">
+    <Exec Command="sh &quot;$(MSBuildProjectDirectory)/../scripts/fix-dylib-install-names.sh&quot; &quot;$(AppBundleDir)&quot;" />
+  </Target>
 </Project>

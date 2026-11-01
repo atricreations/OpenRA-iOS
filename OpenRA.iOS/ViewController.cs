@@ -7,31 +7,39 @@ namespace OpenRA
 	// drawable is landscape by the time the game starts.
 	sealed class ViewController : UIViewController
 	{
-		public ViewController() : base(UIScreen.MainScreen.Bounds)
+		// No frame-based init: scene-based UIKit gives the view its size.
+		public ViewController()
 		{
-			View.BackgroundColor = UIColor.Black;
 		}
 
-		public override bool ShouldAutorotate => true;
-
-		public override UIInterfaceOrientationMask SupportedInterfaceOrientations =>
-			UIInterfaceOrientationMask.Landscape;
+		// Landscape lock comes from Info.plist (UISupportedInterfaceOrientations).
+		// iOS 26+ removed the UIViewController orientation property overrides.
+		public override bool ShouldAutorotate() => true;
 
 		public void StartGame(Action start)
 		{
-			// Defer to the next main-loop iteration so UIKit has created the drawable.
-			View.BeginInvokeOnMainThread(() =>
+			try
 			{
-				try
+				View.BeginInvokeOnMainThread(() =>
 				{
-					start();
-				}
-				catch (Exception e)
-				{
-					Console.WriteLine($"OpenRA iOS startup failed: {e}");
-					ExceptionHandler.HandleFatalError(e);
-				}
-			});
+					StartupTrace.Log("StartGame callback running");
+					try
+					{
+						start();
+					}
+					catch (Exception e)
+					{
+						Console.WriteLine($"OpenRA iOS startup failed: {e}");
+						StartupTrace.Log($"Startup failed: {e}");
+						ExceptionHandler.HandleFatalError(e);
+					}
+				});
+			}
+			catch (Exception e)
+			{
+				Console.WriteLine($"OpenRA iOS scheduling failed: {e}");
+				StartupTrace.Log($"Scheduling failed: {e}");
+			}
 		}
 	}
 }

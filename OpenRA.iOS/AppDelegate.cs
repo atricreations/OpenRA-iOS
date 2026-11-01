@@ -1,7 +1,7 @@
 #region Copyright & License Information
 /*
  * Copyright (c) The OpenRA Developers and Contributors
- * This file is part of OpenRA, which is free software. It is
+ * This file is part of OpenRA. It is free software. It is
  * made available to you under the terms of the GNU General Public License
  * as published by the Free Software Foundation, either version 3 of
  * the License, or (at your option) any later version.
@@ -16,6 +16,7 @@
 using System;
 using AVFoundation;
 using Foundation;
+using ObjCRuntime;
 using OpenRA.Mods.Cnc.FileSystem;
 using UIKit;
 
@@ -24,15 +25,22 @@ namespace OpenRA
 	[Register("AppDelegate")]
 	sealed class AppDelegate : UIApplicationDelegate
 	{
-		public override UIWindow Window { get; set; }
-
-		readonly ViewController rootViewController = new();
-
 		public override bool FinishedLaunching(UIApplication application, NSDictionary launchOptions)
 		{
+			StartupTrace.Log("FinishedLaunching entered");
+
 			// RTS sessions run for a long time without touch input.
 			// Keep the display active so iOS does not suspend the simulation mid-session.
 			application.IdleTimerDisabled = true;
+
+			// UIKit resolves "UISceneDelegateClass" from Info.plist through the ObjC
+			// runtime when the scene activates, which happens after this method
+			// returns. Explicitly register the app assembly with the runtime and
+			// touch the type so its ObjC class is materialized before the lookup.
+			Runtime.RegisterAssembly(typeof(SceneDelegate).Assembly);
+			StartupTrace.Log("RegisterAssembly(app) done");
+			_ = new SceneDelegate();
+			StartupTrace.Log("SceneDelegate touched");
 
 			Platform.OverrideHostPlatform(PlatformType.iOS);
 
@@ -62,18 +70,48 @@ namespace OpenRA
 				Console.WriteLine($"Audio session configuration failed (continuing): {e}");
 			}
 
-			Window = new UIWindow(UIScreen.MainScreen.Bounds)
-			{
-				RootViewController = rootViewController
-			};
-			Window.MakeKeyAndVisible();
-
-			// Return from the app delegate first so UIKit can finish the initial scene and
-			// create the drawable. The callback still runs on the main thread, which SDL's
-			// UIKit backend requires.
-			rootViewController.StartGame(() => IosGameLauncher.Launch());
+			// The game window is normally created by SceneDelegate when the scene
+			// connects. On this runtime the plist-referenced delegate is not always
+			// connected by UIKit, so poll for the connected scene and create the
+			// window ourselves if the delegate never does.
+			EnsureGameStarted(0);
 
 			return true;
+		}
+
+		// Runs on the main thread and re-schedules itself until the game window
+		// exists: either SceneDelegate created it (GameStarted) or we do it here.
+		void EnsureGameStarted(int attempt)
+		{
+			UIWindowScene? target = null;
+			foreach (var s in UIApplication.SharedApplication.ConnectedScenes)
+			{
+				if (s is UIWindowScene ws && ws.Windows.Length == 0)
+				{
+					target = ws;
+					break;
+				}
+			}
+
+			if (target != null)
+			{
+				StartupTrace.Log($"Fallback: creating window for scene (attempt {attempt})");
+				IosGameLauncher.StartGameForScene(target);
+				return;
+			}
+
+			if (IosGameLauncher.GameStarted)
+				return;
+
+			if (attempt < 40)
+			{
+				// Non-repeating timer on the main run loop.
+				_ = NSTimer.CreateScheduledTimer(TimeSpan.FromMilliseconds(250), _ => EnsureGameStarted(attempt + 1));
+			}
+			else
+			{
+				StartupTrace.Log("Fallback: giving up, no windowless scene after 10s");
+			}
 		}
 
 		public override void WillTerminate(UIApplication application)

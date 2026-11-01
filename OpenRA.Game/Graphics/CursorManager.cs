@@ -58,6 +58,17 @@ namespace OpenRA.Graphics
 			// Sort the cursors for better packing onto the sheet.
 			foreach (var kv in modData.Cursors)
 			{
+				// A cursor's sprite source may be absent from the installed
+				// content (e.g. the original-game mouse cursor, which the
+				// quickinstall art package does not ship). Skip such cursors
+				// instead of failing to load the mod - a missing pixel cursor
+				// is harmless on a device without a hardware mouse.
+				if (!modData.DefaultFileSystem.Exists(kv.Value.Src))
+				{
+					Log.Write("debug", $"Skipping cursor {kv.Key}: sprite source '{kv.Value.Src}' is not available.");
+					continue;
+				}
+
 				var cursorSprites = frameCache[kv.Value.Src];
 				var length = kv.Value.Length ?? cursorSprites.Length - kv.Value.Start;
 

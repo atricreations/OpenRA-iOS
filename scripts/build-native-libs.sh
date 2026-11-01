@@ -94,39 +94,190 @@ build_lib() {
     echo "=============================================================="
 
     # ---------------- SDL2 ----------------
+    # SDL2's configure routes to the iOS branch only when the --host string
+    # contains "-ios-" (e.g. arm64-apple-ios-simulator). Canonical device
+    # triplets (arm64-apple-ios27.0) don't match that pattern, so extend the
+    # case pattern in the vendored configure (idempotent sed).
+    local sdl_cfg="$SRC_DIR/SDL2-${SDL2_VERSION}/configure"
+    if ! grep -qF -- '*-ios-*|*-*-ios*)' "$sdl_cfg"; then
+        sed -i '' 's/\*-ios-\*)/-*-ios-*|*-*-ios*)/' "$sdl_cfg"
+    fi
+    # The SDL_config.h.in template has no #undef placeholder for
+    # SDL_VIDEO_DRIVER_UIKIT, so autoconf's AC_DEFINE for it (configure.ac iOS
+    # branch) never reaches the generated SDL_config.h. Every src/video/uikit/*.m
+    # is guarded by that macro and then compiles to an empty object, and SDL
+    # silently falls back to the GL-less "offscreen" driver at runtime
+    # ("OpenGL support is either not configured in SDL ... (offscreen)").
+    # Add the placeholder so configure can fill it in (idempotent).
+    local sdl_tpl="$SRC_DIR/SDL2-${SDL2_VERSION}/include/SDL_config.h.in"
+    if ! grep -qF '#undef SDL_VIDEO_DRIVER_UIKIT' "$sdl_tpl"; then
+        sed -i '' '/^#undef SDL_VIDEO_DRIVER_COCOA$/a\
+#undef SDL_VIDEO_DRIVER_UIKIT
+' "$sdl_tpl"
+    fi
+    # SDL 2.32's SDL_MousePostInit creates the dummy default cursor with
+    # degenerate masks (0xFF, 0xFF, 0xFF, 0xFF) that map to no pixel format,
+    # so SDL_CreateRGBSurface fails and every SDL_Init(VIDEO) leaves a stale
+    # "Unknown pixel format" error in the SDL error state. OpenRA's
+    # CanCreateGLWindow treats any non-empty SDL_GetError() after
+    # SDL_CreateWindow as a failure, so all GL profiles were rejected.
+    # Use proper RGBA8888 masks so the dummy cursor is created (restoring the
+    # intended mouse grab/focus behavior) and no error is set (idempotent).
+    local sdl_mouse="$SRC_DIR/SDL2-${SDL2_VERSION}/src/events/SDL_mouse.c"
+    if ! grep -qF 'SDL_CreateRGBSurface(0, 1, 1, 32, 0xFF, 0xFF, 0xFF, 0xFF)' "$sdl_mouse"; then
+        sed -i '' 's/SDL_CreateRGBSurface(0, 1, 1, 32, 0xFF, 0xFF, 0xFF, 0xFF)/SDL_CreateRGBSurface(0, 1, 1, 32, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000)/' "$sdl_mouse"
+    fi
+    # SDLEAGLContext's dealloc detaches the GL view via
+    # [SDL_uikitview setSDLWindow:nil], mutating the UIKit view hierarchy.
+    # Dealloc runs on whichever thread releases the last EAGL context
+    # reference - for OpenRA that is the render thread inside
+    # SDL_GL_DeleteContext - and iOS aborts the process on off-main-thread
+    # UI changes (NSInternalInconsistencyException). Guard setSDLWindow: so
+    # GL context teardown on a worker thread no longer aborts (idempotent).
+    local sdl_view="$SRC_DIR/SDL2-${SDL2_VERSION}/src/video/uikit/SDL_uikitview.m"
+    if ! grep -qF 'Off-main-thread UI work guard' "$sdl_view"; then
+        python3 - "$sdl_view" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = '''- (void)setSDLWindow:(SDL_Window *)window
+{
+    SDL_WindowData *data = nil;
+
+    if (window == sdlwindow) {
+        return;
+    }'''
+assert s.count(anchor) == 1, "setSDLWindow: anchor not found"
+guard = '''- (void)setSDLWindow:(SDL_Window *)window
+{
+    SDL_WindowData *data = nil;
+
+    /* Off-main-thread UI work guard: this method also runs from
+     * SDLEAGLContext's dealloc, on whichever thread releases the last EAGL
+     * context reference (a render thread in SDL_GL_DeleteContext). UIKit
+     * aborts on view hierarchy changes off the main thread; skip them
+     * there - the owning window's main-thread teardown removes the view. */
+    if (![NSThread isMainThread]) {
+        return;
+    }
+
+    if (window == sdlwindow) {
+        return;
+    }'''
+s = s.replace(anchor, guard)
+open(p, 'w').write(s)
+print("patched SDL_uikitview.m")
+PYEOF
+    fi
+    # presentRenderbuffer presents the *currently-bound* renderbuffer. OpenRA
+    # leaves its own FBO depth renderbuffer bound after drawing, which is not
+    # tied to the CAEAGLLayer, so presentRenderbuffer failed with
+    # GL_INVALID_VALUE (0x502) and the screen stayed black. Rebind the
+    # drawable's renderbuffer right before presenting (idempotent).
+    local sdl_glview="$SRC_DIR/SDL2-${SDL2_VERSION}/src/video/uikit/SDL_uikitopenglview.m"
+    if ! grep -qF 'GL_INVALID_VALUE (0x502). Rebind the' "$sdl_glview"; then
+        python3 - "$sdl_glview" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "    [context presentRenderbuffer:GL_RENDERBUFFER];"
+assert s.count(anchor) == 1, "presentRenderbuffer anchor not found"
+fix = """    /* presentRenderbuffer presents the currently-bound renderbuffer. Cross-
+     * platform engines (OpenRA) bind their own FBO depth renderbuffers and
+     * leave that bound; that renderbuffer is not tied to the CAEAGLLayer, so
+     * presentRenderbuffer failed with GL_INVALID_VALUE (0x502). Rebind the
+     * drawable's renderbuffer before presenting. */
+    glBindRenderbuffer(GL_RENDERBUFFER, viewRenderbuffer);
+
+    [context presentRenderbuffer:GL_RENDERBUFFER];"""
+s = s.replace(anchor, fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitopenglview.m")
+PYEOF
+    fi
+    # Scene-attach: a UIWindow created with the frame initializer and attached
+    # to a scene afterward is not composited on scene-based hosts (its
+    # CAEAGLLayer drawable is never shown -> black). Find the host's active
+    # window scene and create the window with initWithWindowScene: so the
+    # window server displays it; prefer the foreground-active scene (correct
+    # for the iPhone Duo's multiple scenes) (idempotent).
+    local sdl_win="$SRC_DIR/SDL2-${SDL2_VERSION}/src/video/uikit/SDL_uikitwindow.m"
+    if ! grep -qF 'Scene-attach' "$sdl_win"; then
+        python3 - "$sdl_win" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+decl_anchor = "        SDL_Window *other;\n        UIWindow *uiwindow;"
+assert s.count(decl_anchor) == 1, "window decl anchor not found"
+s = s.replace(decl_anchor,
+    "        SDL_Window *other;\n        UIWindow *uiwindow;\n        UIWindowScene *hostScene = nil;")
+create_anchor = """        /* ignore the size user requested, and make a fullscreen window */
+        /* !!! FIXME: can we have a smaller view? */
+        uiwindow = [[SDL_uikitwindow alloc] initWithFrame:data.uiscreen.bounds];"""
+assert s.count(create_anchor) == 1, "create window anchor not found"
+create_fix = """        /* ignore the size user requested, and make a fullscreen window */
+        /* Scene-attach: in scene-based host apps, a UIWindow created with the
+         * frame initializer and attached to a scene afterward is not
+         * composited by the window server (its CAEAGLLayer drawable is never
+         * shown -> black screen). Find the host's active window scene FIRST
+         * and create the window directly with it (initWithWindowScene:) so
+         * the window server actually displays it. Fall back to the frame
+         * initializer if no scene is connected yet. */
+        if (@available(iOS 13.0, tvOS 13.0, *)) {
+            for (UIScene *candidate in [UIApplication sharedApplication].connectedScenes) {
+                if ([candidate isKindOfClass:[UIWindowScene class]]) {
+                    hostScene = (UIWindowScene *)candidate;
+                    if (candidate.activationState == UISceneActivationStateForegroundActive) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (hostScene != nil) {
+            uiwindow = [[SDL_uikitwindow alloc] initWithWindowScene:hostScene];
+            uiwindow.frame = hostScene.coordinateSpace.bounds;
+            window->x = 0;
+            window->y = 0;
+            window->w = (int)hostScene.coordinateSpace.bounds.size.width;
+            window->h = (int)hostScene.coordinateSpace.bounds.size.height;
+        } else {
+            /* !!! FIXME: can we have a smaller view? */
+            uiwindow = [[SDL_uikitwindow alloc] initWithFrame:data.uiscreen.bounds];
+        }"""
+s = s.replace(create_anchor, create_fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitwindow.m")
+PYEOF
+    fi
     local sdl_build="$SRC_DIR/build-sdl2-$triple"
     rm -rf "$sdl_build"
     mkdir -p "$sdl_build"
-    echo "-- SDL2 $SDL2_VERSION"
+    echo "-- SDL2 $SDL2_VERSION (host: $triple)"
     (cd "$sdl_build" && \
         CC="clang --target=$triple" \
-        CFLAGS="$sysroot_flags -O3 -fPIC" \
+        # -fobjc-arc: the .m sources (uikit video, coreaudio, MFI joystick)
+        # require ARC; clang ignores the flag for plain C files.
+        CFLAGS="$sysroot_flags -O3 -fPIC -fobjc-arc" \
         LDFLAGS="$sysroot_flags" \
-        "$SRC_DIR/SDL2-${SDL2_VERSION}/configure" \
-            --host="$cfg_host" \
+        "$sdl_cfg" \
+            --host="$triple" \
             --prefix=/usr/local \
             --disable-shared \
             --enable-static \
             --disable-everything \
-            --enable-video=cocoa \
-            --enable-audio=coreaudio \
-            --disable-x11 \
-            --disable-x11-shared \
-            --disable-wayland \
-            --disable-alsa \
-            --disable-pulse \
-            --disable-jack \
-            --disable-esd \
-            --disable-oss \
-            --disable-diskaudio \
+            --enable-video \
+            --enable-audio \
             --disable-hidapi \
             --disable-power \
-            --disable-sysvideo \
-            --disable-video-offscreen \
-            > configure.log 2>&1)
+            > configure.log 2>&1) \
+        || { tail -50 "$sdl_build/configure.log"; exit 1; }
     (cd "$sdl_build" && make -j"$(sysctl -n hw.ncpu)" > build.log 2>&1) \
         || { tail -50 "$sdl_build/build.log"; exit 1; }
-    cp "$sdl_build/lib/.libs/libSDL2.a" "$out/libSDL2.a"
+    local sdl_lib
+    sdl_lib="$(find "$sdl_build" -name 'libSDL2.a' | head -1)"
+    [ -n "$sdl_lib" ] || { echo "error: libSDL2.a not found under $sdl_build" >&2; exit 1; }
+    cp "$sdl_lib" "$out/libSDL2.a"
 
     # ---------------- FreeType ----------------
     local ft_build="$SRC_DIR/build-freetype-$triple"
@@ -158,17 +309,33 @@ build_lib() {
     cp "$ft_lib" "$out/libfreetype.a"
 
     # ---------------- Lua 5.1 ----------------
+    local lua_src="$SRC_DIR/lua-${LUA_VERSION}/src"
+    # system() is unavailable on iOS (and not allowed by the App Store);
+    # stub os.execute to fail. Idempotent patch.
+    if ! grep -qF 'system() is unavailable on iOS' "$lua_src/loslib.c"; then
+        sed -i '' 's|  lua_pushinteger(L, system(luaL_optstring(L, 1, NULL)));|  #if defined(TARGET_OS_IPHONE)\
+    (void)L;  /* system() is unavailable on iOS */\
+    lua_pushinteger(L, -1);\
+  #else\
+    lua_pushinteger(L, system(luaL_optstring(L, 1, NULL)));\
+  #endif|' "$lua_src/loslib.c"
+    fi
     echo "-- Lua $LUA_VERSION"
-    (cd "$SRC_DIR/lua-${LUA_VERSION}/src" && \
+    (cd "$lua_src" && \
         make clean > /dev/null 2>&1 || true)
-    (cd "$SRC_DIR/lua-${LUA_VERSION}/src" && \
-        make "static" \
-            MYCC="clang --target=$triple" \
-            MYCFLAGS="$sysroot_flags -O3 -fPIC -DLUA_USE_MACOSX" \
+    # Lua 5.1 has no 'static' target (5.2+ only); 'all' builds liblua.a
+    # plus the lua/luac test binaries. The Makefile hardcodes CC/CFLAGS,
+    # so override both on the command line (same pattern as its built-in
+    # 'aix' target). POSIX + dlopen: iOS has dlopen; LUA_USE_MACOSX would
+    # select NSLinkModule, which is unavailable on iOS.
+    (cd "$lua_src" && \
+        make all \
+            CC="clang --target=$triple" \
+            CFLAGS="$sysroot_flags -O2 -Wall -fPIC -DLUA_USE_POSIX -DLUA_USE_DLOPEN" \
             MYLDFLAGS="$sysroot_flags" \
             > "$SRC_DIR/lua-build-$triple.log" 2>&1) \
         || { tail -50 "$SRC_DIR/lua-build-$triple.log"; exit 1; }
-    cp "$SRC_DIR/lua-${LUA_VERSION}/src/liblua5.1.a" "$out/liblua51.a"
+    cp "$lua_src/liblua.a" "$out/liblua51.a"
 
     echo "-- done: $out"
     ls -l "$out"

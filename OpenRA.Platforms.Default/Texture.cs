@@ -72,7 +72,13 @@ namespace OpenRA.Platforms.Default
 		void SetData(IntPtr data, int width, int height)
 		{
 			PrepareTexture();
-			var glInternalFormat = OpenGL.Profile == GLProfile.Embedded ? OpenGL.GL_BGRA : OpenGL.GL_RGBA8;
+			// The sized format GL_RGBA8 is core in desktop GL 3.x and in the
+			// OpenGL ES 3.0+ that the Embedded profile targets. The unsized
+			// GL_BGRA internal format is rejected with GL_INVALID_ENUM by
+			// Apple's GLES implementation (simulator software renderer and
+			// device). GL_RGBA8 was never usable on GLES 2.0, but that is no
+			// longer a supported target for the Embedded profile.
+			var glInternalFormat = OpenGL.GL_RGBA8;
 			OpenGL.glTexImage2D(OpenGL.GL_TEXTURE_2D, 0, glInternalFormat, width, height,
 				0, OpenGL.GL_BGRA, OpenGL.GL_UNSIGNED_BYTE, data);
 			OpenGL.CheckGLError();
@@ -147,7 +153,13 @@ namespace OpenRA.Platforms.Default
 
 			PrepareTexture();
 
-			var glInternalFormat = OpenGL.Profile == GLProfile.Embedded ? OpenGL.GL_BGRA : OpenGL.GL_RGBA8;
+			// The sized format GL_RGBA8 is core in desktop GL 3.x and in the
+			// OpenGL ES 3.0+ that the Embedded profile targets. The unsized
+			// GL_BGRA internal format is rejected with GL_INVALID_ENUM by
+			// Apple's GLES implementation (simulator software renderer and
+			// device). GL_RGBA8 was never usable on GLES 2.0, but that is no
+			// longer a supported target for the Embedded profile.
+			var glInternalFormat = OpenGL.GL_RGBA8;
 			OpenGL.glCopyTexImage2D(OpenGL.GL_TEXTURE_2D, 0, glInternalFormat, rect.X, rect.Y, rect.Width, rect.Height, 0);
 			OpenGL.CheckGLError();
 		}

@@ -35,19 +35,29 @@ namespace OpenRA
 			this.package = package;
 			this.classification = classification;
 
-			watcher = new FileSystemWatcher(package.Name);
-			watcher.Changed += (_, e) => AddMapAction(MapAction.Update, e.FullPath);
-			watcher.Created += (_, e) => AddMapAction(MapAction.Add, e.FullPath);
-			watcher.Deleted += (_, e) => AddMapAction(MapAction.Delete, e.FullPath);
-			watcher.Renamed += (_, e) => AddMapAction(MapAction.Add, e.FullPath, e.OldFullPath);
+			try
+			{
+				watcher = new FileSystemWatcher(package.Name);
+				watcher.Changed += (_, e) => AddMapAction(MapAction.Update, e.FullPath);
+				watcher.Created += (_, e) => AddMapAction(MapAction.Add, e.FullPath);
+				watcher.Deleted += (_, e) => AddMapAction(MapAction.Delete, e.FullPath);
+				watcher.Renamed += (_, e) => AddMapAction(MapAction.Add, e.FullPath, e.OldFullPath);
 
-			watcher.IncludeSubdirectories = true;
-			watcher.EnableRaisingEvents = true;
+				watcher.IncludeSubdirectories = true;
+				watcher.EnableRaisingEvents = true;
+			}
+			catch (PlatformNotSupportedException)
+			{
+				// Live map watching relies on FileSystemWatcher, which is unavailable
+				// on some platforms (e.g. iOS). Maps do not change during a session
+				// there, so fall back to a tracker that never fires.
+				watcher = null;
+			}
 		}
 
 		public void Dispose()
 		{
-			watcher.Dispose();
+			watcher?.Dispose();
 		}
 
 		void AddMapAction(MapAction mapAction, string fullpath, string oldFullPath = null)

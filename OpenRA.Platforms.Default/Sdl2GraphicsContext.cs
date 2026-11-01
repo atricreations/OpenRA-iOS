@@ -43,6 +43,11 @@ namespace OpenRA.Platforms.Default
 			OpenGL.Initialize();
 			OpenGL.CheckGLError();
 
+			// Remember the window's framebuffer (bound by the platform at context
+			// setup) so FrameBuffer can restore it instead of assuming FBO 0.
+			OpenGL.glGetIntegerv(OpenGL.GL_FRAMEBUFFER_BINDING, out var windowFbo);
+			OpenGL.WindowFramebuffer = (uint)windowFbo;
+
 			OpenGL.glGenVertexArrays(1, out var vao);
 			OpenGL.CheckGLError();
 			OpenGL.glBindVertexArray(vao);

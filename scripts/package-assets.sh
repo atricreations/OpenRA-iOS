@@ -19,6 +19,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 DEST="$REPO_ROOT/OpenRA.iOS/Content/openra-data.zip"
+mkdir -p "$(dirname "$DEST")"
 
 # The engine looks for glsl/ and mods/ under its "engine directory"
 # (Platform.EngineDir), which the iOS launcher points at
@@ -27,15 +28,24 @@ mkdir -p "$STAGE/glsl" "$STAGE/mods"
 cp -R "$REPO_ROOT/glsl/." "$STAGE/glsl/"
 cp -R "$REPO_ROOT/mods/." "$STAGE/mods/"
 
+# "global mix database.dat" maps the classic/CRC hashes inside .mix archives
+# to member filenames. The engine's MixLoader loads it via
+# context.TryOpen("global mix database.dat"), which searches the mounted
+# ^EngineDir package. Without it, mix members (temperat.pal, mouse.shp, ...)
+# have no resolvable name and load as "File not found". It lives at the engine
+# root upstream, so stage it at the zip root (=> engine dir root on extract).
+cp "$REPO_ROOT/global mix database.dat" "$STAGE/"
+
 echo "Packing $(du -sh "$STAGE" | cut -f1) of engine content..."
 rm -f "$DEST"
-if command -v ditto > /dev/null 2>&1; then
-    # macOS-native; stores glsl/ and mods/ at the archive root
-    (cd "$STAGE" && ditto -c -k --keepParent glsl mods "$DEST")
-elif command -v zip > /dev/null 2>&1; then
-    (cd "$STAGE" && zip -qry "$DEST" glsl mods)
+if command -v zip > /dev/null 2>&1; then
+    (cd "$STAGE" && zip -qry "$DEST" glsl mods "global mix database.dat")
+elif command -v bsdtar > /dev/null 2>&1; then
+    # macOS ships bsdtar; -a picks the zip format from the .zip extension.
+    # (ditto cannot archive multiple sources in one call.)
+    (cd "$STAGE" && bsdtar -a -c -f "$DEST" glsl mods "global mix database.dat")
 else
-    echo "error: need 'ditto' (macOS) or 'zip' to build the asset archive" >&2
+    echo "error: need 'zip' or 'bsdtar' to build the asset archive" >&2
     exit 1
 fi
 
