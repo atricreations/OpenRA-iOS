@@ -195,14 +195,107 @@ open(p, 'w').write(s)
 print("patched SDL_uikitopenglview.m")
 PYEOF
     fi
-    # Scene-attach: a UIWindow created with the frame initializer and attached
-    # to a scene afterward is not composited on scene-based hosts (its
-    # CAEAGLLayer drawable is never shown -> black). Find the host's active
-    # window scene and create the window with initWithWindowScene: so the
-    # window server displays it; prefer the foreground-active scene (correct
-    # for the iPhone Duo's multiple scenes) (idempotent).
+    # OpenRA-iOS diagnostics: log the first few swapBuffers and any GL error
+    # after present (idempotent; the present line is unique whether or not
+    # the 0x502 rebind above has been applied).
+    if ! grep -qF 'OpenRA-iOS glview: present' "$sdl_glview"; then
+        python3 - "$sdl_glview" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = "    [context presentRenderbuffer:GL_RENDERBUFFER];"
+assert s.count(anchor) == 1, "presentRenderbuffer anchor not found"
+fix = """    [context presentRenderbuffer:GL_RENDERBUFFER];
+
+    /* OpenRA-iOS diagnostics: log the first presents and any GL error. */
+    {
+        static int openra_present_count = 0;
+        const GLenum openra_gl_error = glGetError();
+        if (++openra_present_count <= 3 || openra_gl_error != GL_NO_ERROR) {
+            NSLog(@"OpenRA-iOS glview: present #%d, glError=0x%04x",
+                  openra_present_count, (unsigned)openra_gl_error);
+        }
+    }"""
+s = s.replace(anchor, fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitopenglview.m (present log)")
+PYEOF
+    fi
+    # OpenRA-iOS diagnostics: log successful GL drawable creation (backing
+    # size, color format, sample count) (idempotent).
+    if ! grep -qF 'OpenRA-iOS glview: drawable' "$sdl_glview"; then
+        python3 - "$sdl_glview" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = """        glBindRenderbuffer(GL_RENDERBUFFER, viewRenderbuffer);
+
+        [self setDebugLabels];"""
+assert s.count(anchor) == 1, "setDebugLabels anchor not found"
+fix = """        glBindRenderbuffer(GL_RENDERBUFFER, viewRenderbuffer);
+
+        NSLog(@"OpenRA-iOS glview: drawable created, backing=%dx%d, colorFormat=0x%x, samples=%d",
+              (int)backingWidth, (int)backingHeight, (int)colorBufferFormat, samples);
+
+        [self setDebugLabels];"""
+s = s.replace(anchor, fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitopenglview.m (drawable log)")
+PYEOF
+    fi
+    # OpenRA-iOS diagnostics: log EAGL context creation (API, view frame,
+    # screen) and GL drawable creation failures, so a device black screen can
+    # be told apart from a failed GL init (idempotent).
+    local sdl_gles="$SRC_DIR/SDL2-${SDL2_VERSION}/src/video/uikit/SDL_uikitopengles.m"
+    if ! grep -qF 'OpenRA-iOS glcontext' "$sdl_gles"; then
+        python3 - "$sdl_gles" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = """        context = [[SDLEAGLContext alloc] initWithAPI:api sharegroup:sharegroup];
+        if (!context) {
+            SDL_SetError("OpenGL ES %d context could not be created", _this->gl_config.major_version);
+            return NULL;
+        }"""
+assert s.count(anchor) == 1, "EAGLContext alloc anchor not found"
+s = s.replace(anchor, anchor + """
+        NSLog(@"OpenRA-iOS glcontext: EAGL context created, api=%d, viewFrame=%@, windowScreen=%@(%@,scale=%.1f)",
+              (int)api, NSStringFromCGRect(frame),
+              data.uiwindow.screen, data.uiwindow.screen ? data.uiwindow.screen.localizedName : @"?", data.uiwindow.screen ? data.uiwindow.screen.scale : 0.0f);""")
+anchor2 = """                                                  context:context];
+
+        if (!view) {
+            return NULL;
+        }"""
+assert s.count(anchor2) == 1, "glview creation anchor not found"
+s = s.replace(anchor2, """                                                  context:context];
+
+        if (!view) {
+            NSLog(@"OpenRA-iOS glcontext: GL drawable creation FAILED: %s", SDL_GetError());
+            return NULL;
+        }""")
+open(p, 'w').write(s)
+print("patched SDL_uikitopengles.m (glcontext logs)")
+PYEOF
+    fi
+    # Scene-attach: in a scene-based host app a window created with the frame
+    # initializer owns no scene; on a multi-scene device (iPhone Duo) the
+    # window server then has no scene to composite it into and its
+    # CAEAGLLayer drawable is never shown (black screen). Find the host's
+    # active window scene (prefer foreground-active) and create the window
+    # with the standard init(windowScene:) initializer (inherited from
+    # UIWindow) so the window belongs to that scene and inherits its screen
+    # and coordinate space. NSLog state so a black screen is diagnosable.
+    # Idempotent; fails loudly on the outdated frame-init variant of this
+    # patch (delete the SDL source tree and re-run to re-extract).
     local sdl_win="$SRC_DIR/SDL2-${SDL2_VERSION}/src/video/uikit/SDL_uikitwindow.m"
-    if ! grep -qF 'Scene-attach' "$sdl_win"; then
+    if grep -qF 'Scene-attach' "$sdl_win" && ! grep -qF 'initWithWindowScene:hostScene' "$sdl_win"; then
+        echo "error: $sdl_win carries an OUTDATED scene-attach patch (frame-init variant)." >&2
+        echo "       Delete $SRC_DIR/SDL2-${SDL2_VERSION} and native/src/build-sdl2-* and re-run" >&2
+        echo "       (sources re-extract offline from the cache)." >&2
+        exit 1
+    fi
+    if ! grep -qF 'initWithWindowScene:hostScene' "$sdl_win"; then
         python3 - "$sdl_win" <<'PYEOF'
 import sys
 p = sys.argv[1]
@@ -216,12 +309,14 @@ create_anchor = """        /* ignore the size user requested, and make a fullscr
         uiwindow = [[SDL_uikitwindow alloc] initWithFrame:data.uiscreen.bounds];"""
 assert s.count(create_anchor) == 1, "create window anchor not found"
 create_fix = """        /* ignore the size user requested, and make a fullscreen window */
-        /* Scene-attach: in scene-based host apps, a UIWindow created with the
-         * frame initializer and attached to a scene afterward is not
-         * composited by the window server (its CAEAGLLayer drawable is never
-         * shown -> black screen). Find the host's active window scene FIRST
-         * and create the window directly with it (initWithWindowScene:) so
-         * the window server actually displays it. Fall back to the frame
+        /* Scene-attach: in scene-based host apps, a window created with the
+         * frame initializer owns no scene; on a multi-scene device (iPhone
+         * Duo) the window server then has no scene to composite it into and
+         * the CAEAGLLayer drawable is never shown (black screen). Find the
+         * host's active window scene FIRST (prefer foreground-active) and
+         * create the window with the standard init(windowScene:) initializer
+         * (inherited from UIWindow) so the window belongs to that scene and
+         * inherits its screen and coordinate space. Fall back to the frame
          * initializer if no scene is connected yet. */
         if (@available(iOS 13.0, tvOS 13.0, *)) {
             for (UIScene *candidate in [UIApplication sharedApplication].connectedScenes) {
@@ -236,18 +331,65 @@ create_fix = """        /* ignore the size user requested, and make a fullscreen
 
         if (hostScene != nil) {
             uiwindow = [[SDL_uikitwindow alloc] initWithWindowScene:hostScene];
-            uiwindow.frame = hostScene.coordinateSpace.bounds;
-            window->x = 0;
-            window->y = 0;
-            window->w = (int)hostScene.coordinateSpace.bounds.size.width;
-            window->h = (int)hostScene.coordinateSpace.bounds.size.height;
+            NSLog(@"OpenRA-iOS scene-attach: window created for host scene, state=%ld, scene=%@",
+                  (long)hostScene.activationState, hostScene);
         } else {
+            NSLog(@"OpenRA-iOS scene-attach: NO host window scene found; frame-init fallback");
             /* !!! FIXME: can we have a smaller view? */
             uiwindow = [[SDL_uikitwindow alloc] initWithFrame:data.uiscreen.bounds];
-        }"""
+        }
+        NSLog(@"OpenRA-iOS scene-attach: window frame=%@ screen=%@(%@,scale=%.1f) windowScene=%@ | sdl display screen=%@(%@,scale=%.1f)",
+              NSStringFromCGRect(uiwindow.frame),
+              uiwindow.screen, uiwindow.screen ? uiwindow.screen.localizedName : @"?", uiwindow.screen ? uiwindow.screen.scale : 0.0f,
+              uiwindow.windowScene,
+              data.uiscreen, data.uiscreen ? data.uiscreen.localizedName : @"?", data.uiscreen ? data.uiscreen.scale : 0.0f);"""
 s = s.replace(create_anchor, create_fix)
 open(p, 'w').write(s)
 print("patched SDL_uikitwindow.m")
+PYEOF
+    fi
+    # OpenRA-iOS diagnostics: log when the SDL window is made key/visible
+    # (frame, screen, windowScene) so a black screen can be told apart from
+    # a window that never composites (idempotent).
+    if ! grep -qF 'OpenRA-iOS show-window' "$sdl_win"; then
+        python3 - "$sdl_win" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = """        SDL_WindowData *data = (__bridge SDL_WindowData *) window->driverdata;
+        [data.uiwindow makeKeyAndVisible];"""
+assert s.count(anchor) == 1, "makeKeyAndVisible anchor not found"
+fix = """        SDL_WindowData *data = (__bridge SDL_WindowData *) window->driverdata;
+        [data.uiwindow makeKeyAndVisible];
+        NSLog(@"OpenRA-iOS show-window: makeKeyAndVisible, frame=%@ screen=%@(%@,scale=%.1f) key=%d windowScene=%@",
+              NSStringFromCGRect(data.uiwindow.frame),
+              data.uiwindow.screen, data.uiwindow.screen ? data.uiwindow.screen.localizedName : @"?", data.uiwindow.screen ? data.uiwindow.screen.scale : 0.0f,
+              (int)data.uiwindow.isKeyWindow, data.uiwindow.windowScene);"""
+s = s.replace(anchor, fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitwindow.m (show-window log)")
+PYEOF
+    fi
+    # A scene-owned window (init(windowScene:)) must keep its scene's screen;
+    # the external-display setScreen below would clobber it (idempotent).
+    if ! grep -qF 'must keep its scene' "$sdl_win"; then
+        python3 - "$sdl_win" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = """        /* put the window on an external display if appropriate. */
+        if (data.uiscreen != [UIScreen mainScreen]) {
+            [uiwindow setScreen:data.uiscreen];
+        }"""
+assert s.count(anchor) == 1, "setScreen anchor not found"
+fix = """        /* put the window on an external display if appropriate. A scene-owned
+         * window (init(windowScene:)) must keep its scene's screen. */
+        if (data.uiscreen != [UIScreen mainScreen] && uiwindow.windowScene == nil) {
+            [uiwindow setScreen:data.uiscreen];
+        }"""
+s = s.replace(anchor, fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitwindow.m (setScreen guard)")
 PYEOF
     fi
     local sdl_build="$SRC_DIR/build-sdl2-$triple"
