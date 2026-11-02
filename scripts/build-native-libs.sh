@@ -221,6 +221,37 @@ open(p, 'w').write(s)
 print("patched SDL_uikitopenglview.m (present log)")
 PYEOF
     fi
+    # OpenRA-iOS black-screen triage: red-clear the first N presents. If the
+    # device shows red, the window/GL/compositing path works and the black
+    # screen is OpenRA content; if it stays black, the window is not visible.
+    # (Idempotent.) Requires the 0x502 rebind patch above (anchor ordering).
+    if ! grep -qF 'openra_red_count' "$sdl_glview"; then
+        python3 - "$sdl_glview" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = """    glBindRenderbuffer(GL_RENDERBUFFER, viewRenderbuffer);
+
+    [context presentRenderbuffer:GL_RENDERBUFFER];"""
+assert s.count(anchor) == 1, "rebind+present anchor not found"
+fix = """    glBindRenderbuffer(GL_RENDERBUFFER, viewRenderbuffer);
+
+    /* OpenRA-iOS black-screen triage: red-clear the first N presents so the
+     * device can prove the presented drawable reaches the screen. */
+    {
+        static int openra_red_count = 0;
+        if (++openra_red_count <= 180) {
+            glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
+    }
+
+    [context presentRenderbuffer:GL_RENDERBUFFER];"""
+s = s.replace(anchor, fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitopenglview.m (red triage)")
+PYEOF
+    fi
     # OpenRA-iOS diagnostics: log successful GL drawable creation (backing
     # size, color format, sample count) (idempotent).
     if ! grep -qF 'OpenRA-iOS glview: drawable' "$sdl_glview"; then
@@ -259,9 +290,9 @@ anchor = """        context = [[SDLEAGLContext alloc] initWithAPI:api sharegroup
         }"""
 assert s.count(anchor) == 1, "EAGLContext alloc anchor not found"
 s = s.replace(anchor, anchor + """
-        NSLog(@"OpenRA-iOS glcontext: EAGL context created, api=%d, viewFrame=%@, windowScreen=%@(%@,scale=%.1f)",
+        NSLog(@"OpenRA-iOS glcontext: EAGL context created, api=%d, viewFrame=%@, windowScreen=%@ scale=%.1f",
               (int)api, NSStringFromCGRect(frame),
-              data.uiwindow.screen, data.uiwindow.screen ? data.uiwindow.screen.localizedName : @"?", data.uiwindow.screen ? data.uiwindow.screen.scale : 0.0f);""")
+              data.uiwindow.screen, data.uiwindow.screen ? data.uiwindow.screen.scale : 0.0f);""")
 anchor2 = """                                                  context:context];
 
         if (!view) {
@@ -338,11 +369,13 @@ create_fix = """        /* ignore the size user requested, and make a fullscreen
             /* !!! FIXME: can we have a smaller view? */
             uiwindow = [[SDL_uikitwindow alloc] initWithFrame:data.uiscreen.bounds];
         }
-        NSLog(@"OpenRA-iOS scene-attach: window frame=%@ screen=%@(%@,scale=%.1f) windowScene=%@ | sdl display screen=%@(%@,scale=%.1f)",
+        NSLog(@"OpenRA-iOS scene-attach: window frame=%@ scale=%.1f window=%@ windowScene=%@ | sdl display screen=%@ nativeBounds=%@",
               NSStringFromCGRect(uiwindow.frame),
-              uiwindow.screen, uiwindow.screen ? uiwindow.screen.localizedName : @"?", uiwindow.screen ? uiwindow.screen.scale : 0.0f,
+              uiwindow.screen ? uiwindow.screen.scale : 0.0f,
+              uiwindow.screen,
               uiwindow.windowScene,
-              data.uiscreen, data.uiscreen ? data.uiscreen.localizedName : @"?", data.uiscreen ? data.uiscreen.scale : 0.0f);"""
+              data.uiscreen,
+              data.uiscreen ? NSStringFromCGRect(data.uiscreen.nativeBounds) : @"?");"""
 s = s.replace(create_anchor, create_fix)
 open(p, 'w').write(s)
 print("patched SDL_uikitwindow.m")
@@ -361,9 +394,9 @@ anchor = """        SDL_WindowData *data = (__bridge SDL_WindowData *) window->d
 assert s.count(anchor) == 1, "makeKeyAndVisible anchor not found"
 fix = """        SDL_WindowData *data = (__bridge SDL_WindowData *) window->driverdata;
         [data.uiwindow makeKeyAndVisible];
-        NSLog(@"OpenRA-iOS show-window: makeKeyAndVisible, frame=%@ screen=%@(%@,scale=%.1f) key=%d windowScene=%@",
+        NSLog(@"OpenRA-iOS show-window: makeKeyAndVisible, frame=%@ screen=%@ scale=%.1f key=%d windowScene=%@",
               NSStringFromCGRect(data.uiwindow.frame),
-              data.uiwindow.screen, data.uiwindow.screen ? data.uiwindow.screen.localizedName : @"?", data.uiwindow.screen ? data.uiwindow.screen.scale : 0.0f,
+              data.uiwindow.screen, data.uiwindow.screen ? data.uiwindow.screen.scale : 0.0f,
               (int)data.uiwindow.isKeyWindow, data.uiwindow.windowScene);"""
 s = s.replace(anchor, fix)
 open(p, 'w').write(s)

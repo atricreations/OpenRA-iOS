@@ -14,6 +14,7 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using AVFoundation;
 using Foundation;
 using ObjCRuntime;
@@ -41,6 +42,8 @@ namespace OpenRA
 			StartupTrace.Log("RegisterAssembly(app) done");
 			_ = new SceneDelegate();
 			StartupTrace.Log("SceneDelegate touched");
+			// Evidence: exactly what the ObjC runtime lookup UIKit performs can see.
+			StartupTrace.Log($"ObjC lookup: 'SceneDelegate' -> {LookupObjCClass("SceneDelegate")} | 'OpenRA.SceneDelegate' -> {LookupObjCClass("OpenRA.SceneDelegate")}");
 
 			Platform.OverrideHostPlatform(PlatformType.iOS);
 
@@ -83,8 +86,18 @@ namespace OpenRA
 		// exists: either SceneDelegate created it (GameStarted) or we do it here.
 		void EnsureGameStarted(int attempt)
 		{
+			var scenes = UIApplication.SharedApplication.ConnectedScenes;
+
+			// Log scene state ~once per second so a black screen can be triaged
+			// from startup-trace.log alone (no scene vs scene-with-window).
+			if (attempt % 4 == 0 || attempt >= 36)
+				StartupTrace.Log($"Fallback probe (attempt {attempt}): appState={UIApplication.SharedApplication.ApplicationState} | {DescribeScenes(scenes)}");
+
+			// Prefer a windowless scene, but a scene that already holds a window
+			// (e.g. the system/launch window) is usable too: SDL creates its own
+			// UIWindow and attaches it to the scene, which then comes to the front.
 			UIWindowScene? target = null;
-			foreach (var s in UIApplication.SharedApplication.ConnectedScenes)
+			foreach (var s in scenes)
 			{
 				if (s is UIWindowScene ws && ws.Windows.Length == 0)
 				{
@@ -92,10 +105,21 @@ namespace OpenRA
 					break;
 				}
 			}
+			if (target == null)
+			{
+				foreach (var s in scenes)
+				{
+					if (s is UIWindowScene ws)
+					{
+						target = ws;
+						break;
+					}
+				}
+			}
 
 			if (target != null)
 			{
-				StartupTrace.Log($"Fallback: creating window for scene (attempt {attempt})");
+				StartupTrace.Log($"Fallback: starting game in scene (attempt {attempt}, windows={target.Windows.Length}, state={target.ActivationState})");
 				IosGameLauncher.StartGameForScene(target);
 				return;
 			}
@@ -110,7 +134,37 @@ namespace OpenRA
 			}
 			else
 			{
-				StartupTrace.Log("Fallback: giving up, no windowless scene after 10s");
+				StartupTrace.Log($"Fallback: giving up, no usable scene after 10s | {DescribeScenes(scenes)}");
+			}
+		}
+
+		static string DescribeScenes(NSSet scenes)
+		{
+			var parts = new List<string>();
+			foreach (var s in scenes)
+			{
+				var ws = s as UIWindowScene;
+			var us = s as UIScene;
+			string state = us == null ? "?" : us.ActivationState.ToString();
+			int winCount = ws == null ? -1 : ws.Windows.Length;
+			parts.Add($"{s.GetType().Name}(state={state},windows={winCount})");
+			}
+			return parts.Count == 0 ? "scenes=0" : $"scenes={parts.Count} [{string.Join(" ", parts)}]";
+		}
+
+		// Mirrors what UIKit does to resolve UISceneDelegateClass (NSClassFromString).
+		static string LookupObjCClass(string name)
+		{
+			try
+			{
+				nint handle = Class.GetHandle(name);
+				if (handle == IntPtr.Zero)
+					return "NULL";
+				return new Class(handle).Name ?? "?";
+			}
+			catch (Exception e)
+			{
+				return $"EXC:{e.Message}";
 			}
 		}
 
