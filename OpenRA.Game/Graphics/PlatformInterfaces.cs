@@ -99,6 +99,7 @@ namespace OpenRA
 		void DrawPrimitives(PrimitiveType pt, int firstVertex, int numVertices);
 		void DrawElements(int numIndices, int offset);
 		void Clear();
+		void SetViewport(int x, int y, int width, int height);
 		void EnableDepthBuffer();
 		void DisableDepthBuffer();
 		void ClearDepthBuffer();

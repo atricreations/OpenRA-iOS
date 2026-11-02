@@ -184,6 +184,13 @@ namespace OpenRA.Platforms.Default
 			OpenGL.CheckGLError();
 		}
 
+		public void SetViewport(int x, int y, int width, int height)
+		{
+			VerifyThreadAffinity();
+			OpenGL.glViewport(x, y, width, height);
+			OpenGL.CheckGLError();
+		}
+
 		public void EnableDepthBuffer()
 		{
 			VerifyThreadAffinity();

@@ -58,9 +58,10 @@ namespace OpenRA
 			// SDL_main.h shim normally does for us. This app ships its own managed
 			// main(), so signal it here before any SDL subsystem (audio, video) inits.
 			SDL.SDL_SetMainReady();
-			// Consume SDL finger events directly instead of also synthesising
-			// duplicate mouse events for every touch.
-			SDL.SDL_SetHint(SDL.SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+			// Let SDL translate touch into mouse events. OpenRA's SDL input pump
+			// (Sdl2Input) only handles SDL_MOUSEBUTTON*/MOTION events, not finger
+			// events, so touches must be synthesised into mouse events to register.
+			SDL.SDL_SetHint(SDL.SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
 			StartupTrace.Log("SDL_SetMainReady done");
 
 			var bundlePath = NSBundle.MainBundle.ResourcePath;

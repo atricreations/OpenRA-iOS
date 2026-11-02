@@ -169,6 +169,99 @@ open(p, 'w').write(s)
 print("patched SDL_uikitview.m")
 PYEOF
     fi
+    # OpenRA-iOS black-screen tracing: log every setSDLWindow: attach/detach
+    # (view class, window arg, thread) plus the resulting controller view,
+    # plus SDLEAGLContext dealloc and UIKit_DestroyWindow. This pinpoints who
+    # removes the game's GL view from the window (the probe shows the
+    # controller's view is an empty plain UIView, not the GL view).
+    # Requires the off-main-thread guard patch above (anchor ordering).
+    # (Idempotent.)
+    if ! grep -qF 'OpenRA-iOS view-attach' "$sdl_view"; then
+        python3 - "$sdl_view" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+
+anchor = """    if (![NSThread isMainThread]) {
+        return;
+    }
+
+    if (window == sdlwindow) {
+        return;
+    }"""
+assert s.count(anchor) == 1, "setSDLWindow guard anchor not found"
+fix = """    if (![NSThread isMainThread]) {
+        NSLog(@"OpenRA-iOS view-attach: SKIP(off-main) view=%@ window=%s",
+              NSStringFromClass([self class]), window ? "SET" : "NULL");
+        return;
+    }
+
+    NSLog(@"OpenRA-iOS view-attach: view=%@ window=%s old=%d views-before=%@",
+          NSStringFromClass([self class]), window ? "SET" : "NULL",
+          (int)(sdlwindow != NULL),
+          sdlwindow ? [((__bridge SDL_WindowData *)sdlwindow->driverdata).views description] : @"-");
+
+    if (window == sdlwindow) {
+        return;
+    }"""
+s = s.replace(anchor, fix)
+
+anchor2 = """        /* Restore the next-oldest view in the old window. */
+        view = data.views.lastObject;
+
+        data.viewcontroller.view = view;"""
+assert s.count(anchor2) == 1, "detach anchor not found"
+fix2 = """        /* Restore the next-oldest view in the old window. */
+        view = data.views.lastObject;
+
+        data.viewcontroller.view = view;
+        NSLog(@"OpenRA-iOS view-attach: DETACHED view=%@ restored=%@ views-left=%lu",
+              NSStringFromClass([self class]),
+              view ? NSStringFromClass([view class]) : @"(nil)",
+              (unsigned long)data.views.count);"""
+s = s.replace(anchor2, fix2)
+
+anchor3 = """        [data.viewcontroller.view removeFromSuperview];
+        data.viewcontroller.view = self;"""
+assert s.count(anchor3) == 1, "attach anchor not found"
+fix3 = """        [data.viewcontroller.view removeFromSuperview];
+        data.viewcontroller.view = self;
+        NSLog(@"OpenRA-iOS view-attach: ATTACHED view=%@ controllerView=%@",
+              NSStringFromClass([self class]),
+              NSStringFromClass([data.viewcontroller.view class]));"""
+s = s.replace(anchor3, fix3)
+
+open(p, 'w').write(s)
+print("patched SDL_uikitview.m (view-attach trace)")
+PYEOF
+    fi
+    local sdl_gles_trace="$SRC_DIR/SDL2-${SDL2_VERSION}/src/video/uikit/SDL_uikitopengles.m"
+    if ! grep -qF 'OpenRA-iOS glcontext: DEALLOC' "$sdl_gles_trace" 2>/dev/null; then
+        python3 - "$sdl_gles_trace" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = """- (void)dealloc
+{
+    /* When the context is deallocated, its view should be removed from any
+     * SDL window that it's attached to. */
+    [self.sdlView setSDLWindow:NULL];
+}"""
+assert s.count(anchor) == 1, "SDLEAGLContext dealloc anchor not found"
+fix = """- (void)dealloc
+{
+    /* When the context is deallocated, its view should be removed from any
+     * SDL window that it's attached to. */
+    NSLog(@"OpenRA-iOS glcontext: DEALLOC view=%@ main=%d",
+          self.sdlView ? NSStringFromClass([self.sdlView class]) : @"(nil)",
+          (int)[NSThread isMainThread]);
+    [self.sdlView setSDLWindow:NULL];
+}"""
+s = s.replace(anchor, fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitopengles.m (dealloc trace)")
+PYEOF
+    fi
     # presentRenderbuffer presents the *currently-bound* renderbuffer. OpenRA
     # leaves its own FBO depth renderbuffer bound after drawing, which is not
     # tied to the CAEAGLLayer, so presentRenderbuffer failed with
@@ -219,37 +312,6 @@ fix = """    [context presentRenderbuffer:GL_RENDERBUFFER];
 s = s.replace(anchor, fix)
 open(p, 'w').write(s)
 print("patched SDL_uikitopenglview.m (present log)")
-PYEOF
-    fi
-    # OpenRA-iOS black-screen triage: red-clear the first N presents. If the
-    # device shows red, the window/GL/compositing path works and the black
-    # screen is OpenRA content; if it stays black, the window is not visible.
-    # (Idempotent.) Requires the 0x502 rebind patch above (anchor ordering).
-    if ! grep -qF 'openra_red_count' "$sdl_glview"; then
-        python3 - "$sdl_glview" <<'PYEOF'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-anchor = """    glBindRenderbuffer(GL_RENDERBUFFER, viewRenderbuffer);
-
-    [context presentRenderbuffer:GL_RENDERBUFFER];"""
-assert s.count(anchor) == 1, "rebind+present anchor not found"
-fix = """    glBindRenderbuffer(GL_RENDERBUFFER, viewRenderbuffer);
-
-    /* OpenRA-iOS black-screen triage: red-clear the first N presents so the
-     * device can prove the presented drawable reaches the screen. */
-    {
-        static int openra_red_count = 0;
-        if (++openra_red_count <= 180) {
-            glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-        }
-    }
-
-    [context presentRenderbuffer:GL_RENDERBUFFER];"""
-s = s.replace(anchor, fix)
-open(p, 'w').write(s)
-print("patched SDL_uikitopenglview.m (red triage)")
 PYEOF
     fi
     # OpenRA-iOS diagnostics: log successful GL drawable creation (backing
@@ -423,6 +485,35 @@ fix = """        /* put the window on an external display if appropriate. A scen
 s = s.replace(anchor, fix)
 open(p, 'w').write(s)
 print("patched SDL_uikitwindow.m (setScreen guard)")
+PYEOF
+    fi
+    # OpenRA-iOS black-screen tracing: log UIKit_DestroyWindow (which detaches
+    # all of a window's views) so the attach/detach sequence is complete
+    # (idempotent).
+    if ! grep -qF 'OpenRA-iOS window: DESTROY' "$sdl_win"; then
+        python3 - "$sdl_win" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+anchor = """void UIKit_DestroyWindow(_THIS, SDL_Window * window)
+{
+    @autoreleasepool {
+        if (window->driverdata != NULL) {
+            SDL_WindowData *data = (__bridge SDL_WindowData *)window->driverdata;
+            NSArray *views = nil;"""
+assert s.count(anchor) == 1, "UIKit_DestroyWindow anchor not found"
+fix = """void UIKit_DestroyWindow(_THIS, SDL_Window * window)
+{
+    @autoreleasepool {
+        if (window->driverdata != NULL) {
+            SDL_WindowData *data = (__bridge SDL_WindowData *)window->driverdata;
+            NSArray *views = nil;
+            NSLog(@"OpenRA-iOS window: DESTROY window=%p views=%lu main=%d",
+                  (void *)window, (unsigned long)data.views.count,
+                  (int)[NSThread isMainThread]);"""
+s = s.replace(anchor, fix)
+open(p, 'w').write(s)
+print("patched SDL_uikitwindow.m (destroy trace)")
 PYEOF
     fi
     local sdl_build="$SRC_DIR/build-sdl2-$triple"

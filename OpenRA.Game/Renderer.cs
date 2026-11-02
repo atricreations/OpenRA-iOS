@@ -163,9 +163,18 @@ namespace OpenRA
 
 		void BeginFrame()
 		{
+			var surfaceSize = Window.SurfaceSize;
+
+			// Ensure the default framebuffer (the presented drawable) has a viewport
+			// matching its pixel size. The final screen->window blit in EndFrame is a
+			// geometry draw clipped by this viewport; some platforms (iOS GL-on-Metal)
+			// leave the default framebuffer viewport at 0x0, which clips the blit to
+			// nothing (black screen) even though glClear (viewport-independent) still
+			// reaches the screen.
+			Context.SetViewport(0, 0, surfaceSize.Width, surfaceSize.Height);
+
 			Context.Clear();
 
-			var surfaceSize = Window.SurfaceSize;
 			var surfaceBufferSize = surfaceSize.NextPowerOf2();
 
 			if (screenSprite == null || screenSprite.Sheet.Size != surfaceBufferSize)

@@ -56,6 +56,7 @@ namespace OpenRA.Platforms.Default
 		Action<object> doEnableScissor;
 		Action<object> doSetBlendMode;
 		Action<object> doSetVSync;
+		Action<object> doSetViewport;
 
 		public ThreadedGraphicsContext(Sdl2GraphicsContext context, int vertexBatchSize, int indexBatchSize)
 		{
@@ -142,6 +143,12 @@ namespace OpenRA.Platforms.Default
 						};
 					doSetBlendMode = mode => context.SetBlendMode((BlendMode)mode);
 					doSetVSync = enabled => context.SetVSyncEnabled((bool)enabled);
+					doSetViewport =
+						tuple =>
+						{
+							var t = ((int, int, int, int))tuple;
+							context.SetViewport(t.Item1, t.Item2, t.Item3, t.Item4);
+						};
 
 					Monitor.Pulse(constructorMonitor);
 				}
@@ -507,6 +514,11 @@ namespace OpenRA.Platforms.Default
 		public void SetVSyncEnabled(bool enabled)
 		{
 			Post(doSetVSync, enabled);
+		}
+
+		public void SetViewport(int x, int y, int width, int height)
+		{
+			Post(doSetViewport, (x, y, width, height));
 		}
 	}
 

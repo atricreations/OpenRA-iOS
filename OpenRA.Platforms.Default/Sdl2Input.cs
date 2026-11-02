@@ -45,7 +45,11 @@ namespace OpenRA.Platforms.Default
 			// On Windows and Linux (X11) events are given in surface coordinates
 			// These must be scaled to our effective window coordinates
 			// Round fractional components up to avoid rounding small deltas to 0
-			if (Platform.CurrentPlatform != PlatformType.OSX && device.EffectiveWindowSize != device.SurfaceSize)
+			// On iOS, SDL already delivers mouse events in effective-window (point)
+			// coordinates (the backing surface is HiDPI-scaled, e.g. 3x), so scaling
+			// by 1/EffectiveWindowScale would shrink the position and make taps miss
+			// their widgets.
+			if (Platform.CurrentPlatform != PlatformType.OSX && !Platform.IsIOS && device.EffectiveWindowSize != device.SurfaceSize)
 			{
 				var s = 1 / device.EffectiveWindowScale;
 				return new int2((int)(Math.Sign(x) / 2f + x * s), (int)(Math.Sign(x) / 2f + y * s));
