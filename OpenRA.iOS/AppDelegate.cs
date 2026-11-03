@@ -61,11 +61,13 @@ namespace OpenRA
 			// Statically register the iOS platform instead of loading OpenRA.Platforms.Default.dll.
 			Game.PlatformFactoryOverride = _ => new OpenRA.Platforms.Default.IosPlatform();
 
-			// Route game audio through the playback category so it is mixed with other apps.
+			// Route game audio through the ambient category so it mixes with other apps
+			// AND respects the device's silent switch / ringer settings (the playback
+			// category, previously used, ignores the silent switch).
 			try
 			{
 				var audioSession = AVAudioSession.SharedInstance();
-				audioSession.SetCategory(AVAudioSessionCategory.Playback, AVAudioSessionCategoryOptions.MixWithOthers);
+				audioSession.SetCategory(AVAudioSessionCategory.Ambient, AVAudioSessionCategoryOptions.MixWithOthers);
 				audioSession.SetActive(true);
 			}
 			catch (Exception e)
