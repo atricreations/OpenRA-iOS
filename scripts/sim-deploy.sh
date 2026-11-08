@@ -26,7 +26,12 @@ APP=bin/iossimulator-arm64/OpenRA.iOS.app
 
 cd "$REPO" || { echo "CD_FAILED"; exit 1; }
 
-echo "=== [1/4] build (iossimulator-arm64, no codesign) ==="
+echo "=== [1/5] package assets (mods/ + glsl/ -> openra-data.zip) ==="
+# Regenerate the bundled engine-content archive from the CURRENT mods/ + glsl/
+# so mod (yml) edits reach the app. dotnet build does NOT rebuild this zip.
+bash "$REPO/scripts/package-assets.sh" || { echo "PACKAGE_ASSETS_FAILED"; exit 1; }
+
+echo "=== [2/5] build (iossimulator-arm64, no codesign) ==="
 dotnet build OpenRA.iOS/OpenRA.iOS.csproj -f net10.0-ios -c Release \
   -p:RuntimeIdentifier=iossimulator-arm64 -p:CodesignDisable=true \
   > /tmp/simdeploy_build.log 2>&1
@@ -39,15 +44,23 @@ if [ "$brc" -ne 0 ]; then
 fi
 [ -d "$APP" ] || { echo "APP_MISSING: $APP"; exit 1; }
 
-echo "=== [2/4] ensure simulator booted ==="
+echo "=== [3/5] ensure simulator booted ==="
 xcrun simctl bootstatus "$SIM" 2>&1 | tail -2
 
-echo "=== [3/4] install + launch ==="
+echo "=== [4/5] install + force re-extract + launch ==="
 xcrun simctl terminate "$SIM" "$BUNDLE" 2>/dev/null
 xcrun simctl install "$SIM" "$APP" 2>&1 | tail -2
+# AssetExtractor only re-extracts openra-data.zip when the bundle-version stamp
+# mismatches; clear it so mod/asset edits in the freshly-installed bundle take
+# effect without bumping the version.
+CONTAINER=$(xcrun simctl get_app_container "$SIM" "$BUNDLE" data 2>/dev/null)
+if [ -n "$CONTAINER" ]; then
+  rm -f "$CONTAINER/Documents/OpenRA/Game/.extracted_version"
+  echo "Cleared extract stamp under: $CONTAINER"
+fi
 xcrun simctl launch "$SIM" "$BUNDLE" 2>&1 | tail -1
 
-echo "=== [4/4] wait + screenshot ==="
+echo "=== [5/5] wait + screenshot ==="
 sleep "$WAIT"
 # $DISPLAY_ARG is empty for a standard single-display sim; quote it so an empty
 # var expands to nothing (not a literal empty argument).

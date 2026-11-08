@@ -15,6 +15,8 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using Foundation;
 
 namespace OpenRA
@@ -29,8 +31,8 @@ namespace OpenRA
 			Directory.CreateDirectory(targetDir);
 
 			var stampFile = Path.Combine(targetDir, VersionStampFile);
-			var appVersion = AppVersionStamp();
-			if (File.Exists(stampFile) && File.ReadAllText(stampFile).Trim() == appVersion)
+			var assetStamp = ComputeAssetStamp();
+			if (File.Exists(stampFile) && File.ReadAllText(stampFile).Trim() == assetStamp)
 			{
 				onProgress?.Invoke("Assets up to date.");
 				return;
@@ -73,14 +75,34 @@ namespace OpenRA
 				}
 			}
 
-			File.WriteAllText(stampFile, appVersion);
+			File.WriteAllText(stampFile, assetStamp);
 			onProgress?.Invoke("Assets extracted successfully.");
 		}
 
-		static string AppVersionStamp()
+		// Fingerprint = app version + SHA256 of the bundled archive. Including the
+		// archive hash means a re-packaged openra-data.zip (e.g. after a mod/yml
+		// edit) forces a re-extract WITHOUT bumping the app version. This lets the
+		// device dev loop do a plain reinstall (no uninstall -> no profile re-trust)
+		// and still pick up fresh assets whenever the archive content changes.
+		static string ComputeAssetStamp()
 		{
 			var info = NSBundle.MainBundle.InfoDictionary;
-			return $"{info["CFBundleShortVersionString"]}_{info["CFBundleVersion"]}";
+			var version = $"{info["CFBundleShortVersionString"]}_{info["CFBundleVersion"]}";
+			var zipPath = NSBundle.MainBundle.PathForResource(DataZipName, "zip");
+			if (zipPath == null)
+				return version + "_nozip";
+
+			byte[] hashBytes;
+			using (var sha = SHA256.Create())
+			using (var stream = File.OpenRead(zipPath))
+			{
+				hashBytes = sha.ComputeHash(stream);
+			}
+
+			var sb = new StringBuilder(hashBytes.Length * 2);
+			foreach (var b in hashBytes)
+				sb.Append(b.ToString("x2"));
+			return version + "_" + sb.ToString();
 		}
 	}
 }
