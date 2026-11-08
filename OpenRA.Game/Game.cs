@@ -526,7 +526,10 @@ namespace OpenRA
 
 			ModData = new ModData(manifest, Mods, true);
 
-			LocalPlayerProfile = new LocalPlayerProfile(Path.Combine(Platform.SupportDir, Settings.Game.AuthProfile), ModData.GetOrCreate<PlayerDatabase>());
+			LocalPlayerProfile = new LocalPlayerProfile(
+				Path.Combine(Platform.SupportDir, Settings.Game.AuthProfile),
+				ModData.GetOrCreate<PlayerDatabase>(),
+				Settings.Game.MinimalProfile);
 
 			if (!ModData.LoadScreen.BeforeLoad(ModData))
 				return;

@@ -54,12 +54,17 @@ namespace OpenRA
 
 		public PlayerProfile ProfileData => profileData;
 
-		public LocalPlayerProfile(string filePath, PlayerDatabase playerDatabase)
+		public LocalPlayerProfile(string filePath, PlayerDatabase playerDatabase, bool minimalProfile = false)
 		{
 			this.filePath = filePath;
 			this.playerDatabase = playerDatabase;
 			LoadKeyPair();
-			RefreshPlayerData();
+			// In minimal-profile mode (e.g. the iOS build, where the forum keypair
+			// check is unavailable) skip the network lookup entirely — there is no
+			// linked-profile UI to populate, and the connection error would be
+			// meaningless. The keypair on disk is left untouched.
+			if (!minimalProfile)
+				RefreshPlayerData();
 		}
 
 		void LoadKeyPair()

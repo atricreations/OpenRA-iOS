@@ -19,7 +19,10 @@ namespace OpenRA.Mods.Common.Widgets.Logic
 		[ObjectCreator.UseCtor]
 		public LoadLocalPlayerProfileLogic(Widget widget, World world)
 		{
-			Func<bool> minimalProfile = () => Ui.CurrentWindow() != null;
+			// The forum keypair/profile check is unavailable in the iOS build, and the
+			// link/error dialogs would cover the main menu. Default to the minimal panel
+			// (see GameSettings.MinimalProfile); users can re-enable the full panels.
+			Func<bool> minimalProfile = () => Game.Settings.Game.MinimalProfile;
 
 			Game.LoadWidget(world, "LOCAL_PROFILE_PANEL", widget, new WidgetArgs()
 			{

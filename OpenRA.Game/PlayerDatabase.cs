@@ -20,7 +20,7 @@ namespace OpenRA
 	public class PlayerDatabase : IGlobalModData
 	{
 		public readonly string Forum = "https://forum.openra.net/";
-		public readonly string Profile = "https://forum.openra.net/openra/info/";
+		public readonly string Profile = "https://forum.openra.net/profile/";
 		public readonly string Link = "https://forum.openra.net/openra/link";
 		public readonly int IconSize = 24;
 

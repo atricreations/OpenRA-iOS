@@ -345,6 +345,11 @@ namespace OpenRA
 		[Desc("Filename of the authentication profile to use.")]
 		public string AuthProfile = "player.oraid";
 
+		[Desc("Show the minimal (no forum-link) profile panel. On by default for the iOS build, " +
+			"where the forum keypair check is unavailable and the link/error dialogs would cover " +
+			"the main menu. Set to false to restore the full forum-profile panels.")]
+		public bool MinimalProfile = true;
+
 		public Modifiers ZoomModifier = Modifiers.None;
 
 		public bool FetchNews = true;
