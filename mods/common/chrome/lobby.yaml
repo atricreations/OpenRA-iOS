@@ -10,7 +10,7 @@ Background@SERVER_LOBBY:
 	X: (WINDOW_WIDTH - WIDTH) / 2
 	Y: (WINDOW_HEIGHT - HEIGHT) / 2
 	Width: 900
-	Height: 600
+	Height: WINDOW_HEIGHT
 	Children:
 		Label@SERVER_NAME:
 			Y: 16
@@ -110,7 +110,7 @@ Background@SERVER_LOBBY:
 			X: 20
 			Y: PARENT_HEIGHT - HEIGHT - 20
 			Width: PARENT_WIDTH - 40
-			Height: 259
+			Height: 62
 			Children:
 				ScrollPanel@CHAT_DISPLAY:
 					Width: PARENT_WIDTH
