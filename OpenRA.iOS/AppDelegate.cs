@@ -26,6 +26,9 @@ namespace OpenRA
 	[Register("AppDelegate")]
 	sealed class AppDelegate : UIApplicationDelegate
 	{
+		System.Threading.Timer audioReassertTimer;
+		int audioReassertCount;
+
 		public override bool FinishedLaunching(UIApplication application, NSDictionary launchOptions)
 		{
 			StartupTrace.Log("FinishedLaunching entered");
@@ -122,6 +125,10 @@ namespace OpenRA
 			if (target != null)
 			{
 				StartupTrace.Log($"Fallback: starting game in scene (attempt {attempt}, windows={target.Windows.Length}, state={target.ActivationState})");
+				// Start re-asserting Ambient before the (blocking) game loop runs,
+				// so the background timer keeps the silent-switch behavior even if
+				// SDL's audio init re-sets the category.
+				StartAudioReassert();
 				IosGameLauncher.StartGameForScene(target);
 				return;
 			}
@@ -167,6 +174,42 @@ namespace OpenRA
 			catch (Exception e)
 			{
 				return $"EXC:{e.Message}";
+			}
+		}
+
+		// Re-assert the Ambient audio category so the app respects the silent
+		// switch. SDL's native CoreAudio backend may re-set the category to
+		// Playback when it initializes audio; re-asserting periodically (on a
+		// background thread, since the game loop blocks the main run loop)
+		// overrides that for the first 60 seconds, covering audio init.
+		void StartAudioReassert()
+		{
+			ReassertAmbient();
+			audioReassertCount = 0;
+			audioReassertTimer = new System.Threading.Timer(_ =>
+			{
+				ReassertAmbient();
+				audioReassertCount++;
+				if (audioReassertCount >= 60)
+				{
+					audioReassertTimer?.Dispose();
+					audioReassertTimer = null;
+				}
+			}, null, 1000, 1000);
+		}
+
+		void ReassertAmbient()
+		{
+			try
+			{
+				var session = AVAudioSession.SharedInstance();
+				// Always re-assert Ambient (a no-op if already Ambient) so it survives
+				// any SDL override.
+				session.SetCategory(AVAudioSessionCategory.Ambient, AVAudioSessionCategoryOptions.MixWithOthers);
+			}
+			catch (Exception e)
+			{
+				Console.WriteLine($"ReassertAmbient failed: {e}");
 			}
 		}
 
