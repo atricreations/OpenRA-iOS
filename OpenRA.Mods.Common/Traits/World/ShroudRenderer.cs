@@ -121,6 +121,7 @@ namespace OpenRA.Mods.Common.Traits
 		Func<PPos, Shroud.CellVisibility> cellVisibility;
 		TerrainSpriteLayer shroudLayer, fogLayer;
 		PaletteReference shroudPaletteReference, fogPaletteReference;
+		float cellOverlapScale = 1f;
 		bool disposed;
 
 		public ShroudRenderer(World world, ShroudRendererInfo info)
@@ -227,6 +228,11 @@ namespace OpenRA.Mods.Common.Traits
 			fogPaletteReference = wr.Palette(info.FogPalette);
 			shroudLayer = new TerrainSpriteLayer(w, wr, emptySprite, shroudBlend, false);
 			fogLayer = new TerrainSpriteLayer(w, wr, emptySprite, fogBlend, false);
+
+			// iOS (GL-on-Metal) can leave a 1px coverage gap at cell boundaries when tiling
+			// shroud sprites, visible as 1px lines at the shroud cell period. Grow each
+			// sprite by 1px so neighbouring cells overlap and hide the gap.
+			cellOverlapScale = Platform.IsIOS ? 1f + 1f / wr.TileSize.Width : 1f;
 
 			WorldOnRenderPlayerChanged(world.RenderPlayer);
 		}
@@ -345,8 +351,8 @@ namespace OpenRA.Mods.Common.Traits
 				if (fogSprite.Sprite != null)
 					fogPos += fogSprite.Sprite.Offset - 0.5f * fogSprite.Sprite.Size;
 
-				shroudLayer.Update(uv, shroudSprite.Sprite, shroudPaletteReference, shroudPos, shroudSprite.Scale, shroudSprite.Alpha, true);
-				fogLayer.Update(uv, fogSprite.Sprite, fogPaletteReference, fogPos, fogSprite.Scale, fogSprite.Alpha, true);
+				shroudLayer.Update(uv, shroudSprite.Sprite, shroudPaletteReference, shroudPos, shroudSprite.Scale * cellOverlapScale, shroudSprite.Alpha, true);
+				fogLayer.Update(uv, fogSprite.Sprite, fogPaletteReference, fogPos, fogSprite.Scale * cellOverlapScale, fogSprite.Alpha, true);
 			}
 
 			anyCellDirty = false;
