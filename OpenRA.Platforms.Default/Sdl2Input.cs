@@ -19,6 +19,7 @@ namespace OpenRA.Platforms.Default
 	sealed class Sdl2Input
 	{
 		MouseButton lastButtonBits = MouseButton.None;
+		long rightClickFingerId = 0;
 
 		public static string GetClipboardText() { return SDL.SDL_GetClipboardText(); }
 		public static bool SetClipboardText(string text) { return SDL.SDL_SetClipboardText(text) == 0; }
@@ -63,6 +64,17 @@ namespace OpenRA.Platforms.Default
 			}
 
 			return new int2(x, y);
+		}
+
+		// Convert a normalized SDL touch position (0..1) to effective-window (point)
+		// coordinates, clamped to the window. Used to map second-finger touch events to
+		// the synthesized right-click position on iOS.
+		static int2 MapTouchPosition(Sdl2PlatformWindow device, float x, float y)
+		{
+			var size = device.EffectiveWindowSize;
+			var mx = Math.Clamp((int)(x * size.Width), 0, Math.Max(0, size.Width - 1));
+			var my = Math.Clamp((int)(y * size.Height), 0, Math.Max(0, size.Height - 1));
+			return new int2(mx, my);
 		}
 
 		public void PumpInput(Sdl2PlatformWindow device, IInputHandler inputHandler, int2? lockedMousePosition)
@@ -204,6 +216,38 @@ namespace OpenRA.Platforms.Default
 
 						var pos = EventPosition(device, x, y);
 						inputHandler.OnMouseInput(new MouseInput(MouseInputEvent.Scroll, MouseButton.None, pos, new int2(0, e.wheel.y), mods, 0));
+
+						break;
+					}
+
+					// iOS two-finger right-click emulation: while a finger holds the
+					// on-screen trackball (a camera-pan widget), a second finger touching
+					// anywhere else is delivered to the game as a right mouse click. SDL
+					// synthesizes only the FIRST finger into mouse events, so this second
+					// finger never reaches the game otherwise and would be ignored.
+					case SDL.SDL_EventType.SDL_FINGERDOWN:
+					case SDL.SDL_EventType.SDL_FINGERUP:
+					{
+						if (Platform.IsIOS)
+						{
+							var pos = MapTouchPosition(device, e.tfinger.x, e.tfinger.y);
+							if (e.type == SDL.SDL_EventType.SDL_FINGERDOWN)
+							{
+								// Arm only for a touch outside the trackball (the trackball's
+								// own finger is already driving the camera).
+								if (rightClickFingerId == 0 && RightClickEmulator.TrackballHeld
+									&& !RightClickEmulator.TrackballRect.Contains(pos))
+								{
+									rightClickFingerId = e.tfinger.fingerId;
+									inputHandler.OnMouseInput(new MouseInput(MouseInputEvent.Down, MouseButton.Right, pos, int2.Zero, mods, 0));
+								}
+							}
+							else if (e.tfinger.fingerId == rightClickFingerId)
+							{
+								rightClickFingerId = 0;
+								inputHandler.OnMouseInput(new MouseInput(MouseInputEvent.Up, MouseButton.Right, pos, int2.Zero, mods, 0));
+							}
+						}
 
 						break;
 					}

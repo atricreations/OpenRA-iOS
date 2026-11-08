@@ -61,6 +61,12 @@ Container@INGAME_ROOT:
 				StrategicProgress@STRATEGIC_PROGRESS:
 					X: WINDOW_WIDTH / 2
 					Y: 40
+				Trackball@TRACKBALL:
+					X: 14
+					Y: WINDOW_HEIGHT - HEIGHT - 14 - 55
+					Width: 120
+					Height: 120
+					Sensitivity: 1.725
 				Container@PLAYER_ROOT:
 				Container@PERF_ROOT:
 		Container@MENU_ROOT:
