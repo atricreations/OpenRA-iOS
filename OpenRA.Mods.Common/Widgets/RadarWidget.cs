@@ -325,6 +325,13 @@ namespace OpenRA.Mods.Common.Widgets
 
 		public override bool HandleMouseInput(MouseInput mi)
 		{
+			// mapRect is only converted from local (radar-relative) to absolute
+			// screen coords during the open animation in Tick(). Recompute it from
+			// the live RenderOrigin so the hit-test always matches where the radar
+			// is actually drawn, regardless of animation state.
+			var ro = RenderOrigin;
+			mapRect = new Rectangle(previewOrigin.X + ro.X, previewOrigin.Y + ro.Y, mapRect.Width, mapRect.Height);
+
 			if (!mapRect.Contains(mi.Location))
 				return false;
 
@@ -332,31 +339,20 @@ namespace OpenRA.Mods.Common.Widgets
 				return true;
 
 			var worldCoords = MinimapPixelToWorldCoords(mi.Location);
-			if ((mi.Event == MouseInputEvent.Down && mi.Button != world.OrderGenerator.ActionButton) ||
+			// On touch, the tap maps to the (Classic) action button, so the original
+			// "Down && button != ActionButton" gate never fires. Make any Down on the
+			// radar center the camera (primary minimap behavior); drags keep working.
+			if (mi.Event == MouseInputEvent.Down ||
 				(mi.Event == MouseInputEvent.Move && isMinimapMoving && mi.Button == minimapMoveButton))
 			{
+				// Hand camera control to the player: clear any ViewportCenterProvider
+				// (e.g. CameraOvalMover on shellmap maps) so it stops re-centering the
+				// viewport every tick and overriding this Center() call.
+				if (worldRenderer.Viewport.ViewportCenterProvider != null)
+					worldRenderer.Viewport.ViewportCenterProvider = null;
 				worldRenderer.Viewport.Center(worldCoords);
 				isMinimapMoving = true;
 				minimapMoveButton = mi.Button;
-			}
-			else if (mi.Event == MouseInputEvent.Down && WorldInteractionController != null)
-			{
-				var wpos = new WPos((int)worldCoords.X, (int)worldCoords.Y, 0);
-
-				// fake a mousedown/mouseup here
-				var location = worldRenderer.Viewport.WorldToViewPx(worldRenderer.ScreenPxPosition(wpos));
-				var fakemi = new MouseInput
-				{
-					Event = MouseInputEvent.Down,
-					Button = mi.Button,
-					Modifiers = mi.Modifiers,
-					Location = location,
-				};
-
-				var controller = Ui.Root.Get<WorldInteractionControllerWidget>(WorldInteractionController);
-				controller.HandleMouseInput(fakemi);
-				fakemi.Event = MouseInputEvent.Up;
-				controller.HandleMouseInput(fakemi);
 			}
 			else if (mi.Event == MouseInputEvent.Up && mi.Button == minimapMoveButton)
 			{
